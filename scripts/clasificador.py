@@ -220,10 +220,22 @@ class Clasificador:
            porque las ultimas ventanas de la racha (las que mas pesan) son
            las que consolidan la tendencia.
 
-        Devuelve tambien 'confianza_baja' = True cuando la mejor racha
-        ganadora fue de una sola ventana (sin corroboracion de vecinas) --
-        no descarta la deteccion, solo la marca para quien quiera loguearlo
-        distinto (ej. no mandarlo a BirdWeather pero si al log local)."""
+        Devuelve tambien 'confianza_baja': True cuando la racha ganadora es
+        chica Y ademas no es la totalidad del evento (hubo otras ventanas
+        que no fueron parte de ella). Investigacion real (24/08): notas de
+        ave individuales pueden durar apenas 8-400ms -- mucho menos que
+        VENTANA_S=3.0s -- asi que un canto genuinamente corto puede
+        producir de forma legitima una racha de 1-2 ventanas nada mas, sin
+        que eso sea sintoma de mala deteccion. Lo que si es sospechoso es
+        una racha chica ganando en un evento MAS LARGO, donde el resto de
+        las ventanas fueron para otras especies o quedaron sin clasificar
+        con claridad -- eso es evidencia debil (un "blip" aislado), no un
+        canto corto real. Por eso NO alcanza con mirar el largo de racha
+        solo: racha_maxima == total_ventanas (todo el evento coincidio, sin
+        excepcion) nunca es confianza_baja aunque sea chica; racha_maxima
+        chica Y menor al total si lo es. No descarta la deteccion, solo la
+        marca para quien quiera loguearlo distinto (ej. no mandarlo a
+        BirdWeather pero si al log local)."""
         rachas_por_especie = {}  # idx -> lista de (largo, confianza_ponderada) de cada racha vista
         i = 0
         while i < len(ventanas):
@@ -257,7 +269,8 @@ class Clasificador:
             'especie_comun': self.nombre_comun_de(self.labels[idx_top]),
             'confianza': float(confianza),
             'racha_maxima': largo,
-            'confianza_baja': largo == 1,
+            'total_ventanas': len(ventanas),
+            'confianza_baja': largo <= 2 and largo < len(ventanas),
             'detectado': True,
         }
 
