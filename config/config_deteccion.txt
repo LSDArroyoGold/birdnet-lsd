@@ -90,24 +90,3 @@ BLOQUES_BUFFER_ANTERIORES = 2
 # implica un piso de ruido (TRIGGER_PERCENTIL_PISO) mas localizado y menos
 # latencia hasta que se evalua si arranco un evento.
 DURACION_BLOQUE_S = 5
-
-# --- Canal grave del disparador (OPCIONAL, apagado por defecto) ---
-# Segundo filtro pasa-banda independiente, para especies con vocalizacion
-# por debajo de la banda principal (TRIGGER_BANDA_MIN_HZ=1500) -- medido
-# el 24/08: Anser anser, Jacana jacana y Cinclodes fuscus tienen mediana
-# espectral ~90-100Hz, y quedaron sistematicamente sin detectar en el
-# barrido nocturno de esa sesion por esta razon. Se combina con la banda
-# principal por OR (mas actividad detectada, nunca menos) -- la banda
-# principal NO se toca, sigue siendo exactamente la validada el 22-24/08.
-#
-# Apagado por defecto a proposito: la banda grave tipica (60-300Hz) se
-# superpone con la fundamental de la voz humana (~85-255Hz) y con ruido
-# de manipulacion/viento/trafico -- mas disparos espurios en un
-# dispositivo de campo con gente cerca en ciertos horarios, aunque el
-# clasificador despues los descarte, cuestan CPU/bateria de mas sin
-# necesidad. Activar (CANAL_GRAVE_HABILITADO = true) solo si el sitio de
-# despliegue tiene de verdad estas especies. Validado el 24/08 con
-# reproduccion real de Anser anser -- ver detector.py.
-CANAL_GRAVE_HABILITADO = false
-CANAL_GRAVE_MIN_HZ = 60
-CANAL_GRAVE_MAX_HZ = 300
