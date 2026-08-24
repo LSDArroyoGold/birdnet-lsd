@@ -198,7 +198,7 @@ class Clasificador:
         largo, confs = candidatos[idx]
         return {'especie': self.labels[idx], 'confianza': float(np.mean(confs)), 'detectado': True}
 
-    def decidir_confianza_racha(self, ventanas):
+    def decidir_confianza_racha(self, ventanas, incluir_diagnostico=False):
         """Hibrido definido el 23/08, flujo corregido el mismo dia:
 
         1. NO se filtra por CONFIDENCE ventana por ventana de entrada (por
@@ -219,6 +219,16 @@ class Clasificador:
            con un promedio ponderado mas alto que un pico aislado corto,
            porque las ultimas ventanas de la racha (las que mas pesan) son
            las que consolidan la tendencia.
+
+        incluir_diagnostico: si True, cuando la mejor racha NO cruza
+        CONFIDENCE, en vez de devolver None directamente devuelve un dict
+        con 'detectado': False y el mejor candidato descartado (especie +
+        confianza) -- pensado para loguear en pruebas la diferencia entre
+        "el disparador nunca vio nada" (ventanas vacio, sigue devolviendo
+        None) y "vio algo pero no llego a confianza" (agregado 24/08, ver
+        Reporte_sesion_nocturna_24-08-2026.md). No cambia el comportamiento
+        para el caso ya calibrado (confianza >= CONFIDENCE): ese resultado
+        es identico con o sin este parametro.
 
         Devuelve tambien 'confianza_baja': True cuando la racha ganadora es
         chica Y ademas no es la totalidad del evento (hubo otras ventanas
@@ -262,6 +272,12 @@ class Clasificador:
         largo, confianza = mejor_por_especie[idx_top]
 
         if confianza < self.confidence:
+            if incluir_diagnostico:
+                return {
+                    'especie_comun': self.nombre_comun_de(self.labels[idx_top]),
+                    'confianza': float(confianza),
+                    'detectado': False,
+                }
             return None
 
         return {

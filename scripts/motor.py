@@ -83,8 +83,15 @@ def procesar_evento(clasificador, evento, config_sync, config_bw):
         return  # evento sin timestamp real o demasiado corto para tener sentido
 
     ventanas = clasificador.analizar_ventanas_todas(audio)
-    resultado = clasificador.decidir_confianza_racha(ventanas)
+    resultado = clasificador.decidir_confianza_racha(ventanas, incluir_diagnostico=True)
     if resultado is None:
+        print(f"[{timestamp_inicio.isoformat()}] disparador activo, evento sin ventanas "
+              f"analizables (audio={len(audio)/SR:.1f}s)", flush=True)
+        return
+    if not resultado['detectado']:
+        print(f"[{timestamp_inicio.isoformat()}] disparador activo, sin clasificacion confiable "
+              f"(mejor candidato: {resultado['especie_comun']} {resultado['confianza']:.2f} "
+              f"< umbral {clasificador.confidence}, audio={len(audio)/SR:.1f}s)", flush=True)
         return
 
     nombre, carpeta_relativa = exportador.nombre_archivo(resultado, timestamp_inicio)
