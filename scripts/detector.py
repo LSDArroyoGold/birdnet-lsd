@@ -41,6 +41,9 @@ def cargar_config(path):
         'DURACION_MAXIMA_EVENTO_S': c.getfloat('DURACION_MAXIMA_EVENTO_S'),
         'BLOQUES_BUFFER_ANTERIORES': c.getint('BLOQUES_BUFFER_ANTERIORES'),
         'ALPHA_PISO_EMA': c.getfloat('ALPHA_PISO_EMA'),
+        'CANAL_GRAVE_HABILITADO': c.getboolean('CANAL_GRAVE_HABILITADO', fallback=False),
+        'CANAL_GRAVE_MIN_HZ': c.getfloat('CANAL_GRAVE_MIN_HZ', fallback=60.0),
+        'CANAL_GRAVE_MAX_HZ': c.getfloat('CANAL_GRAVE_MAX_HZ', fallback=300.0),
     }
 
 
@@ -79,37 +82,74 @@ class DetectorActividad:
         self.percentil_piso = config['TRIGGER_PERCENTIL_PISO']
         self.margen_db = config['TRIGGER_MARGEN_DB']
 
-    def mascara_actividad(self, audio, piso_db=None):
+        # Canal grave OPCIONAL (default apagado): segundo filtro pasa-banda
+        # independiente, mas su propio piso de ruido, para especies con
+        # vocalizaciones por debajo de la banda principal (ej. Anser anser,
+        # Jacana jacana, Cinclodes fuscus: mediana espectral ~90-100Hz,
+        # medido el 24/08 sobre las fallas persistentes del barrido nocturno
+        # -- ver INFORME de esa sesion). Se combina con la banda principal
+        # por OR (actividad si CUALQUIERA de las dos ve algo), nunca la
+        # reemplaza ni le cambia el comportamiento cuando esta apagado --
+        # sigue siendo exactamente el detector validado el 22-24/08.
+        # Apagado por defecto a proposito: la banda grave tipica (60-300Hz)
+        # se superpone con la fundamental de la voz humana (~85-255Hz) y
+        # con ruido de manipulacion/viento/trafico -- en un dispositivo de
+        # campo con gente cerca en ciertos horarios, mas disparos espurios
+        # cuestan CPU/bateria de mas aunque el clasificador los termine
+        # descartando. Activar solo si el sitio de despliegue realmente
+        # tiene esas especies.
+        self.canal_grave_habilitado = config['CANAL_GRAVE_HABILITADO']
+        if self.canal_grave_habilitado:
+            self.sos_grave = butter(
+                4,
+                [config['CANAL_GRAVE_MIN_HZ'], config['CANAL_GRAVE_MAX_HZ']],
+                btype='band', fs=SR, output='sos',
+            )
+
+    def _rms_db(self, audio, sos):
+        filtrado = sosfiltfilt(sos, audio)
+        rms = librosa.feature.rms(y=filtrado, frame_length=self.frame, hop_length=self.hop)[0]
+        return 20 * np.log10(np.maximum(rms, 1e-10))
+
+    def mascara_actividad(self, audio, piso_db=None, piso_grave_db=None):
         """Devuelve (mascara_booleana_por_frame, tiempos_de_cada_frame).
 
-        piso_db: piso de ruido fijo, en dB, para usar en vez de calcularlo
-        con el percentil sobre `audio`. Fundamental para juzgar el CIERRE
-        de un evento ya largo: si se recalcula el percentil sobre el
-        propio evento acumulado (que puede ser ruidoso de punta a punta,
-        ej. manipulacion del equipo durante una prueba), el piso se
-        recalibra contra ese mismo ruido y el evento nunca se ve
-        "en silencio" relativo a si mismo -- encontrado el 23-24/08
-        probando en campo (tres detecciones seguidas cortadas por el
-        tope de DURACION_MAXIMA_EVENTO_S en vez de por silencio real).
-        Con piso_db fijo (ver AcumuladorEventos.piso_referencia_db,
+        piso_db/piso_grave_db: piso de ruido fijo, en dB, para usar en vez
+        de calcularlo con el percentil sobre `audio` (uno por canal).
+        Fundamental para juzgar el CIERRE de un evento ya largo: si se
+        recalcula el percentil sobre el propio evento acumulado (que puede
+        ser ruidoso de punta a punta, ej. manipulacion del equipo durante
+        una prueba), el piso se recalibra contra ese mismo ruido y el
+        evento nunca se ve "en silencio" relativo a si mismo -- encontrado
+        el 23-24/08 probando en campo (tres detecciones seguidas cortadas
+        por el tope de DURACION_MAXIMA_EVENTO_S en vez de por silencio
+        real). Con piso fijo (ver AcumuladorEventos.piso_referencia_db,
         calculado UNA vez del contexto anterior al disparo) el cierre se
         compara siempre contra "como sonaba antes de que arrancara esto",
-        no contra el propio contenido del evento."""
-        filtrado = sosfiltfilt(self.sos, audio)
-        rms = librosa.feature.rms(y=filtrado, frame_length=self.frame, hop_length=self.hop)[0]
-        rms_db = 20 * np.log10(np.maximum(rms, 1e-10))
+        no contra el propio contenido del evento.
+
+        Si el canal grave esta habilitado, la actividad es la UNION
+        (OR) de lo que ve cada canal -- ver comentario en __init__."""
+        rms_db = self._rms_db(audio, self.sos)
         piso = piso_db if piso_db is not None else np.percentile(rms_db, self.percentil_piso)
         activo = rms_db > (piso + self.margen_db)
+
+        if self.canal_grave_habilitado:
+            rms_db_grave = self._rms_db(audio, self.sos_grave)
+            piso_grave = piso_grave_db if piso_grave_db is not None else np.percentile(rms_db_grave, self.percentil_piso)
+            activo = activo | (rms_db_grave > (piso_grave + self.margen_db))
+
         tiempos = librosa.frames_to_time(np.arange(len(activo)), sr=SR, hop_length=self.hop)
         return activo, tiempos
 
-    def piso_de(self, audio):
+    def piso_de(self, audio, grave=False):
         """Piso de ruido (percentil TRIGGER_PERCENTIL_PISO) de un tramo de
         audio, sin decidir actividad -- para congelar una referencia fija
-        ANTES de que arranque un evento (ver AcumuladorEventos)."""
-        filtrado = sosfiltfilt(self.sos, audio)
-        rms = librosa.feature.rms(y=filtrado, frame_length=self.frame, hop_length=self.hop)[0]
-        rms_db = 20 * np.log10(np.maximum(rms, 1e-10))
+        ANTES de que arranque un evento (ver AcumuladorEventos).
+        grave=True usa el filtro del canal grave (solo tiene sentido si
+        canal_grave_habilitado)."""
+        sos = self.sos_grave if grave else self.sos
+        rms_db = self._rms_db(audio, sos)
         return float(np.percentile(rms_db, self.percentil_piso))
 
     def hay_actividad(self, audio):
@@ -134,6 +174,7 @@ class AcumuladorEventos:
         self.evento_audio = None       # None = no hay evento en curso
         self.timestamp_inicio_evento = None  # datetime real del inicio del evento en curso
         self.piso_referencia_db = None  # piso de ruido congelado del contexto anterior al disparo
+        self.piso_referencia_grave_db = None  # idem, canal grave (solo si esta habilitado)
         self.muestras_desde_ultima_actividad = 0
         self.eventos_terminados = []   # lista de {'audio':..., 'timestamp_inicio':...}, uno por evento
 
@@ -178,9 +219,10 @@ class AcumuladorEventos:
         # tramo del propio bloque previo al onset -- se congela aca y no
         # se vuelve a tocar mientras dure el evento (ver mascara_actividad).
         tramo_referencia = contexto_previo if len(contexto_previo) >= SR * 0.5 else bloque[:max(1, int(inicio_s * SR))]
-        self.piso_referencia_db = (
-            self.detector.piso_de(tramo_referencia) if len(tramo_referencia) >= SR * 0.2 else None
-        )
+        hay_tramo = len(tramo_referencia) >= SR * 0.2
+        self.piso_referencia_db = self.detector.piso_de(tramo_referencia) if hay_tramo else None
+        if self.detector.canal_grave_habilitado:
+            self.piso_referencia_grave_db = self.detector.piso_de(tramo_referencia, grave=True) if hay_tramo else None
 
         audio_total_disponible = np.concatenate([contexto_previo, bloque]) if len(contexto_previo) else bloque
         self.evento_audio = audio_total_disponible[max(0, inicio_absoluto_muestra):]
@@ -208,15 +250,19 @@ class AcumuladorEventos:
         # ~3 bloques (~15s) ante un ambiente que sube y se mantiene, sin
         # cortar de mas ningun canto real probado (pausas internas cortas
         # bien por debajo de SILENCIO_FIN_EVENTO_S).
+        alpha = self.config['ALPHA_PISO_EMA']
         if self.piso_referencia_db is not None:
             piso_bloque = self.detector.piso_de(bloque)
-            alpha = self.config['ALPHA_PISO_EMA']
             self.piso_referencia_db = alpha * self.piso_referencia_db + (1 - alpha) * piso_bloque
+        if self.detector.canal_grave_habilitado and self.piso_referencia_grave_db is not None:
+            piso_bloque_grave = self.detector.piso_de(bloque, grave=True)
+            self.piso_referencia_grave_db = alpha * self.piso_referencia_grave_db + (1 - alpha) * piso_bloque_grave
 
         self._chequear_fin_o_continuar(bloque_actual_ya_incluido=True)
 
     def _chequear_fin_o_continuar(self, bloque_actual_ya_incluido):
-        mascara, tiempos = self.detector.mascara_actividad(self.evento_audio, piso_db=self.piso_referencia_db)
+        mascara, tiempos = self.detector.mascara_actividad(
+            self.evento_audio, piso_db=self.piso_referencia_db, piso_grave_db=self.piso_referencia_grave_db)
 
         if mascara.any():
             ultimo_frame_activo = len(mascara) - 1 - int(np.argmax(mascara[::-1]))
@@ -234,7 +280,8 @@ class AcumuladorEventos:
     def _cerrar_evento(self, recortar_silencio_final):
         audio_final = self.evento_audio
         if recortar_silencio_final:
-            mascara, tiempos = self.detector.mascara_actividad(audio_final, piso_db=self.piso_referencia_db)
+            mascara, tiempos = self.detector.mascara_actividad(
+                audio_final, piso_db=self.piso_referencia_db, piso_grave_db=self.piso_referencia_grave_db)
             if mascara.any():
                 ultimo_frame_activo = len(mascara) - 1 - int(np.argmax(mascara[::-1]))
                 fin_s = tiempos[ultimo_frame_activo] + (self.detector.hop / SR)
@@ -255,6 +302,7 @@ class AcumuladorEventos:
         self.evento_audio = None
         self.timestamp_inicio_evento = None
         self.piso_referencia_db = None
+        self.piso_referencia_grave_db = None
 
     def finalizar(self):
         """Llamar al terminar el stream (o al apagar el dispositivo) para
