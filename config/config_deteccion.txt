@@ -49,6 +49,18 @@ MARGEN_FINAL_PCT = 25
 # palliatus con p90 de ~22s) con margen.
 DURACION_MAXIMA_EVENTO_S = 30
 
+# Peso del piso de referencia "viejo" en el promedio movil que lo actualiza
+# bloque a bloque mientras dura un evento (1.0 = nunca se actualiza, queda
+# congelado como el 23/08; mas bajo = se adapta mas rapido a un ambiente
+# que sube y se sostiene, ej. viento o trafico). Barrido el 24/08 con
+# reproduccion sintetica: 0.8 recupera en ~3 bloques (~15s) ante un
+# ambiente 4x mas alto sostenido, sin cortar de mas ningun canto real
+# probado (con pausas internas cortas, todas por debajo de
+# SILENCIO_FIN_EVENTO_S) -- el percentil bajo de TRIGGER_PERCENTIL_PISO ya
+# protege esos casos, asi que valores mas bajos de alpha no mostraron
+# riesgo adicional en las pruebas, pero se dejo un margen conservador.
+ALPHA_PISO_EMA = 0.8
+
 # Cuantos bloques de audio "anteriores" mantener siempre disponibles en el
 # buffer rodante (sobrescribiendose), para poder reconstruir el inicio real
 # de un canto aunque el disparo haya caido en medio de el, o cuando el

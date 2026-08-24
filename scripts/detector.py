@@ -40,6 +40,7 @@ def cargar_config(path):
         'MARGEN_FINAL_PCT': c.getfloat('MARGEN_FINAL_PCT'),
         'DURACION_MAXIMA_EVENTO_S': c.getfloat('DURACION_MAXIMA_EVENTO_S'),
         'BLOQUES_BUFFER_ANTERIORES': c.getint('BLOQUES_BUFFER_ANTERIORES'),
+        'ALPHA_PISO_EMA': c.getfloat('ALPHA_PISO_EMA'),
     }
 
 
@@ -195,6 +196,23 @@ class AcumuladorEventos:
 
     def _continuar_evento(self, bloque):
         self.evento_audio = np.concatenate([self.evento_audio, bloque])
+
+        # Promedio movil (EMA) del piso de referencia: se mezcla con el
+        # piso propio de ESTE bloque nuevo, no con el evento acumulado
+        # completo (eso reintroduciria el bug original -- ver
+        # mascara_actividad). Deja que el piso se adapte a un ambiente
+        # que sube y se sostiene (viento, trafico) en pocos bloques, sin
+        # ser sensible a un canto real: piso_de() ya usa un percentil bajo
+        # (TRIGGER_PERCENTIL_PISO), robusto a picos breves dentro del
+        # bloque. Validado el 24/08 con barrido de alpha: 0.8 recupera en
+        # ~3 bloques (~15s) ante un ambiente que sube y se mantiene, sin
+        # cortar de mas ningun canto real probado (pausas internas cortas
+        # bien por debajo de SILENCIO_FIN_EVENTO_S).
+        if self.piso_referencia_db is not None:
+            piso_bloque = self.detector.piso_de(bloque)
+            alpha = self.config['ALPHA_PISO_EMA']
+            self.piso_referencia_db = alpha * self.piso_referencia_db + (1 - alpha) * piso_bloque
+
         self._chequear_fin_o_continuar(bloque_actual_ya_incluido=True)
 
     def _chequear_fin_o_continuar(self, bloque_actual_ya_incluido):
