@@ -101,10 +101,22 @@ def procesar_evento(clasificador, evento, config_sync, config_bw):
         flush=True,
     )
 
-    try:
-        birdweather.enviar_deteccion(config_bw, resultado, timestamp_inicio, audio, SR)
-    except Exception as e:
-        print(f'BirdWeather fallo (sigue el loop): {e}', file=sys.stderr, flush=True)
+    if resultado.get('confianza_baja'):
+        # Racha de una sola ventana, sin corroboracion de vecinas -- mas
+        # propensa a error (confirmado el 24/08 probando en campo: un
+        # canto largo real partido en 2 eventos dio una especie
+        # incorrecta con 96% de confianza en el fragmento de racha=1, y
+        # la especie correcta recien en el fragmento con racha=4). No se
+        # descarta la deteccion (sigue guardada local y en Drive como
+        # evidencia), pero no se postea a BirdWeather como si fuera una
+        # identificacion confirmada.
+        print(f"BirdWeather: salteado por confianza_baja (racha=1) -- {resultado['especie_comun']}",
+              flush=True)
+    else:
+        try:
+            birdweather.enviar_deteccion(config_bw, resultado, timestamp_inicio, audio, SR)
+        except Exception as e:
+            print(f'BirdWeather fallo (sigue el loop): {e}', file=sys.stderr, flush=True)
 
     if not drive.subir_deteccion(config_sync, ruta_local, carpeta_relativa, nombre):
         print(f'Drive: no se pudo subir {nombre} (sigue el loop, sin reintentar)',
