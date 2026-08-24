@@ -78,15 +78,38 @@ class DetectorActividad:
         self.percentil_piso = config['TRIGGER_PERCENTIL_PISO']
         self.margen_db = config['TRIGGER_MARGEN_DB']
 
-    def mascara_actividad(self, audio):
-        """Devuelve (mascara_booleana_por_frame, tiempos_de_cada_frame)."""
+    def mascara_actividad(self, audio, piso_db=None):
+        """Devuelve (mascara_booleana_por_frame, tiempos_de_cada_frame).
+
+        piso_db: piso de ruido fijo, en dB, para usar en vez de calcularlo
+        con el percentil sobre `audio`. Fundamental para juzgar el CIERRE
+        de un evento ya largo: si se recalcula el percentil sobre el
+        propio evento acumulado (que puede ser ruidoso de punta a punta,
+        ej. manipulacion del equipo durante una prueba), el piso se
+        recalibra contra ese mismo ruido y el evento nunca se ve
+        "en silencio" relativo a si mismo -- encontrado el 23-24/08
+        probando en campo (tres detecciones seguidas cortadas por el
+        tope de DURACION_MAXIMA_EVENTO_S en vez de por silencio real).
+        Con piso_db fijo (ver AcumuladorEventos.piso_referencia_db,
+        calculado UNA vez del contexto anterior al disparo) el cierre se
+        compara siempre contra "como sonaba antes de que arrancara esto",
+        no contra el propio contenido del evento."""
         filtrado = sosfiltfilt(self.sos, audio)
         rms = librosa.feature.rms(y=filtrado, frame_length=self.frame, hop_length=self.hop)[0]
         rms_db = 20 * np.log10(np.maximum(rms, 1e-10))
-        piso = np.percentile(rms_db, self.percentil_piso)
+        piso = piso_db if piso_db is not None else np.percentile(rms_db, self.percentil_piso)
         activo = rms_db > (piso + self.margen_db)
         tiempos = librosa.frames_to_time(np.arange(len(activo)), sr=SR, hop_length=self.hop)
         return activo, tiempos
+
+    def piso_de(self, audio):
+        """Piso de ruido (percentil TRIGGER_PERCENTIL_PISO) de un tramo de
+        audio, sin decidir actividad -- para congelar una referencia fija
+        ANTES de que arranque un evento (ver AcumuladorEventos)."""
+        filtrado = sosfiltfilt(self.sos, audio)
+        rms = librosa.feature.rms(y=filtrado, frame_length=self.frame, hop_length=self.hop)[0]
+        rms_db = 20 * np.log10(np.maximum(rms, 1e-10))
+        return float(np.percentile(rms_db, self.percentil_piso))
 
     def hay_actividad(self, audio):
         mascara, _ = self.mascara_actividad(audio)
@@ -109,6 +132,7 @@ class AcumuladorEventos:
 
         self.evento_audio = None       # None = no hay evento en curso
         self.timestamp_inicio_evento = None  # datetime real del inicio del evento en curso
+        self.piso_referencia_db = None  # piso de ruido congelado del contexto anterior al disparo
         self.muestras_desde_ultima_actividad = 0
         self.eventos_terminados = []   # lista de {'audio':..., 'timestamp_inicio':...}, uno por evento
 
@@ -148,6 +172,15 @@ class AcumuladorEventos:
         contexto_previo = np.concatenate(self.buffer_bloques) if self.buffer_bloques else np.array([], dtype=np.float32)
         inicio_absoluto_muestra = len(contexto_previo) + int(inicio_s * SR)
 
+        # Piso de referencia para todo este evento: del contexto ANTERIOR
+        # al disparo (buffer rodante), o si todavia no hay buffer, del
+        # tramo del propio bloque previo al onset -- se congela aca y no
+        # se vuelve a tocar mientras dure el evento (ver mascara_actividad).
+        tramo_referencia = contexto_previo if len(contexto_previo) >= SR * 0.5 else bloque[:max(1, int(inicio_s * SR))]
+        self.piso_referencia_db = (
+            self.detector.piso_de(tramo_referencia) if len(tramo_referencia) >= SR * 0.2 else None
+        )
+
         audio_total_disponible = np.concatenate([contexto_previo, bloque]) if len(contexto_previo) else bloque
         self.evento_audio = audio_total_disponible[max(0, inicio_absoluto_muestra):]
         self.muestras_desde_ultima_actividad = 0
@@ -165,7 +198,7 @@ class AcumuladorEventos:
         self._chequear_fin_o_continuar(bloque_actual_ya_incluido=True)
 
     def _chequear_fin_o_continuar(self, bloque_actual_ya_incluido):
-        mascara, tiempos = self.detector.mascara_actividad(self.evento_audio)
+        mascara, tiempos = self.detector.mascara_actividad(self.evento_audio, piso_db=self.piso_referencia_db)
 
         if mascara.any():
             ultimo_frame_activo = len(mascara) - 1 - int(np.argmax(mascara[::-1]))
@@ -183,19 +216,27 @@ class AcumuladorEventos:
     def _cerrar_evento(self, recortar_silencio_final):
         audio_final = self.evento_audio
         if recortar_silencio_final:
-            mascara, tiempos = self.detector.mascara_actividad(audio_final)
+            mascara, tiempos = self.detector.mascara_actividad(audio_final, piso_db=self.piso_referencia_db)
             if mascara.any():
                 ultimo_frame_activo = len(mascara) - 1 - int(np.argmax(mascara[::-1]))
                 fin_s = tiempos[ultimo_frame_activo] + (self.detector.hop / SR)
                 margen_s = self.config['SILENCIO_FIN_EVENTO_S'] * (self.config['MARGEN_FINAL_PCT'] / 100.0)
                 fin_muestra = min(len(audio_final), int((fin_s + margen_s) * SR))
                 audio_final = audio_final[:fin_muestra]
+        else:
+            # Cierre por tope de seguridad: procesar_bloque() solo chequea
+            # el tope DESPUES de pegar un bloque entero, asi que puede
+            # sobrepasarlo hasta en un bloque completo (ej. 33.9s con
+            # DURACION_MAXIMA_EVENTO_S=30) -- recortar con precision al
+            # tope exacto en vez de dejar pasar ese sobrante.
+            audio_final = audio_final[:self._maximo_evento_muestras()]
         self.eventos_terminados.append({
             'audio': audio_final,
             'timestamp_inicio': self.timestamp_inicio_evento,
         })
         self.evento_audio = None
         self.timestamp_inicio_evento = None
+        self.piso_referencia_db = None
 
     def finalizar(self):
         """Llamar al terminar el stream (o al apagar el dispositivo) para
