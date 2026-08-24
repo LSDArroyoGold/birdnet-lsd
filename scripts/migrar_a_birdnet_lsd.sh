@@ -73,7 +73,11 @@ fi
 cd "$BIRDNET_LSD_DIR" || abortar "no se pudo entrar a $BIRDNET_LSD_DIR"
 
 # --- instalar (venv + modelo + sesgo), solo si todavia no esta ---
-if [ ! -d venv ]; then
+# Chequea el ultimo archivo que instalar.sh deja (no solo la carpeta
+# venv/): si una corrida anterior fallo a mitad de camino (ej. se corto
+# la red bajando el modelo), venv/ ya existiria pero incompleto, y
+# saltear instalar.sh de nuevo lo dejaria asi para siempre.
+if [ ! -f modelo/stock_regional_meta.json ]; then
 	bash instalar.sh || abortar "fallo instalar.sh"
 fi
 
