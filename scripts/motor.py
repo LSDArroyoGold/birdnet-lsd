@@ -31,21 +31,17 @@ from detector import SR, AcumuladorEventos, cargar_config, cargar_config_birdwea
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def cargar_config_captura(path):
-    """Lee REC_CARD/CHANNELS/DURACION_BLOQUE_S del mismo
-    config_deteccion.txt -- cargar_config() de detector.py ignora estas
-    claves porque solo extrae las que ya conocia, asi que conviven sin
-    problema en el mismo archivo."""
+def cargar_duracion_bloque(path):
+    """Lee DURACION_BLOQUE_S de config_deteccion.txt -- cargar_config() de
+    detector.py ignora esta clave porque solo extrae las que ya conocia,
+    asi que conviven sin problema en el mismo archivo. REC_CARD/CHANNELS
+    (especificos del microfono de cada dispositivo, no del algoritmo) se
+    leen aparte, de config_sincronizacion.txt -- ver drive.py."""
     parser = configparser.ConfigParser()
     with open(path) as f:
         contenido = '[DEFAULT]\n' + f.read()
     parser.read_string(contenido)
-    c = parser['DEFAULT']
-    return {
-        'REC_CARD': c.get('REC_CARD', fallback='default').strip(),
-        'CHANNELS': c.getint('CHANNELS', fallback=1),
-        'DURACION_BLOQUE_S': c.getfloat('DURACION_BLOQUE_S', fallback=5.0),
-    }
+    return parser['DEFAULT'].getfloat('DURACION_BLOQUE_S', fallback=5.0)
 
 
 def leer_bloques_arecord(rec_card, channels, duracion_bloque_s):
@@ -126,7 +122,7 @@ def procesar_evento(clasificador, evento, config_sync, config_bw):
 def main():
     ruta_config_deteccion = os.path.join(BASE_DIR, 'config/config_deteccion.txt')
     config_det = cargar_config(ruta_config_deteccion)
-    config_cap = cargar_config_captura(ruta_config_deteccion)
+    duracion_bloque_s = cargar_duracion_bloque(ruta_config_deteccion)
     config_bw = cargar_config_birdweather(os.path.join(BASE_DIR, 'config/config_birdweather.txt'))
     config_sync = drive.cargar_config_sincronizacion(
         os.path.join(BASE_DIR, 'config/config_sincronizacion.txt'))
@@ -138,16 +134,16 @@ def main():
         podado_json=os.path.join(BASE_DIR, 'modelo/v10_podado.json'),
         bias_json=os.path.join(BASE_DIR, 'modelo/stock_regional_meta.json'),
     )
-    acumulador = AcumuladorEventos(config_det, duracion_bloque_s=config_cap['DURACION_BLOQUE_S'])
+    acumulador = AcumuladorEventos(config_det, duracion_bloque_s=duracion_bloque_s)
 
     print(
-        f"birdnet-lsd arrancando (bloque={config_cap['DURACION_BLOQUE_S']}s, "
-        f"card={config_cap['REC_CARD']}, canales={config_cap['CHANNELS']})",
+        f"birdnet-lsd arrancando (bloque={duracion_bloque_s}s, "
+        f"card={config_sync['REC_CARD']}, canales={config_sync['CHANNELS']})",
         flush=True,
     )
 
     for bloque, timestamp_bloque in leer_bloques_arecord(
-        config_cap['REC_CARD'], config_cap['CHANNELS'], config_cap['DURACION_BLOQUE_S']
+        config_sync['REC_CARD'], config_sync['CHANNELS'], duracion_bloque_s
     ):
         acumulador.procesar_bloque(bloque, timestamp_bloque=timestamp_bloque)
         while acumulador.eventos_terminados:

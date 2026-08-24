@@ -15,10 +15,17 @@ import subprocess
 
 def cargar_config_sincronizacion(path):
     """path: config/config_sincronizacion.txt (no el .ejemplo). Devuelve
-    todo vacio si el archivo no existe todavia -- subir_deteccion() ya
-    sabe no hacer nada en ese caso, igual que con BirdWeather."""
+    todo vacio/por-defecto si el archivo no existe todavia --
+    subir_deteccion() ya sabe no hacer nada en ese caso, igual que con
+    BirdWeather. Tambien viven aca REC_CARD/CHANNELS (tarjeta ALSA y
+    canales del microfono): son especificos de cada dispositivo, igual
+    que DRIVE_PATH, asi que van en el mismo archivo gitignored en vez de
+    en config_deteccion.txt (que es compartido/versionado)."""
     if not os.path.isfile(path):
-        return {'RCLONE_CONFIG': '', 'DRIVE_REMOTE': '', 'DRIVE_PATH': '', 'AUDIO_ROOT': ''}
+        return {
+            'RCLONE_CONFIG': '', 'DRIVE_REMOTE': '', 'DRIVE_PATH': '', 'AUDIO_ROOT': '',
+            'DRIVE_SUBCARPETA': 'Detecciones', 'REC_CARD': 'default', 'CHANNELS': 2,
+        }
     parser = configparser.ConfigParser()
     with open(path) as f:
         contenido = '[DEFAULT]\n' + f.read()
@@ -28,6 +35,9 @@ def cargar_config_sincronizacion(path):
         'RCLONE_CONFIG': c.get('RCLONE_CONFIG', fallback='').strip(),
         'DRIVE_REMOTE': c.get('DRIVE_REMOTE', fallback='').strip(),
         'DRIVE_PATH': c.get('DRIVE_PATH', fallback='').strip(),
+        'DRIVE_SUBCARPETA': c.get('DRIVE_SUBCARPETA', fallback='Detecciones').strip(),
+        'REC_CARD': c.get('REC_CARD', fallback='default').strip(),
+        'CHANNELS': c.getint('CHANNELS', fallback=2),
         'AUDIO_ROOT': c.get('AUDIO_ROOT', fallback='').strip(),
     }
 
@@ -68,7 +78,8 @@ def subir_deteccion(config_sync, ruta_local, carpeta_relativa, nombre_archivo, t
         partes = partes[1:]
     carpeta_relativa_remota = '/'.join(partes)
 
-    destino = f'{remote}:{drive_path}/Detecciones/{carpeta_relativa_remota}/{nombre_archivo}'
+    subcarpeta = config_sync.get('DRIVE_SUBCARPETA') or 'Detecciones'
+    destino = f'{remote}:{drive_path}/{subcarpeta}/{carpeta_relativa_remota}/{nombre_archivo}'
     env = os.environ.copy()
     if config_sync.get('RCLONE_CONFIG'):
         env['RCLONE_CONFIG'] = config_sync['RCLONE_CONFIG']

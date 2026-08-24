@@ -79,11 +79,9 @@ ALPHA_PISO_EMA = 0.8
 BLOQUES_BUFFER_ANTERIORES = 2
 
 # --- Captura de audio en vivo (scripts/motor.py) ---
-# Mismos parametros que usa birdnet_recording.sh de BirdNET-Pi para el
-# mismo dispositivo (ver /etc/birdnet/birdnet.conf): tarjeta ALSA (o
-# "default" para dejar que PulseAudio resuelva) y cantidad de canales.
-REC_CARD = default
-CHANNELS = 2
+# REC_CARD/CHANNELS (tarjeta ALSA y canales del microfono) NO estan aca:
+# son especificos de cada dispositivo, no del algoritmo -- viven en
+# config/config_sincronizacion.txt (gitignored), junto con DRIVE_PATH.
 
 # Duracion de cada bloque leido de arecord antes de pasarlo a
 # AcumuladorEventos.procesar_bloque(). No tiene relacion con

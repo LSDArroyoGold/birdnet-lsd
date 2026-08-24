@@ -3,13 +3,22 @@
 # (ver .gitignore) -- son datos del dispositivo, no del algoritmo.
 #
 # DRIVE_PATH es el mismo valor que ya vive en config_general.txt de
-# LSD-Tector1.1/2.0 (variable DRIVE_PATH) -- se duplica aca porque
-# birdnet-lsd es un repo aparte, sin acceso a esos otros config.
+# LSD-Tector2.0 (variable DRIVE_PATH), o el que use el equivalente de
+# LSD-Tector1.1 -- se duplica aca porque birdnet-lsd es un repo aparte,
+# sin acceso a esos otros config. DRIVE_SUBCARPETA es el nombre de la
+# carpeta de detecciones dentro de DRIVE_PATH (LSD-Tector2.0 usa
+# "Detecciones", LSD-Tector1.1 usa "BirdNET_Detecciones" -- cada
+# dispositivo mantiene el nombre que ya usaba, para no partir su
+# historial en dos lugares distintos de Drive).
 RCLONE_CONFIG = /home/lsd/.config/rclone/rclone.conf
 DRIVE_REMOTE = gdrive
 DRIVE_PATH =
-# OJO: sin "/By_Date" al final -- exportador.nombre_archivo() ya arma la
-# carpeta_relativa empezando con "By_Date/...", asi que sumarlo aca lo
-# duplica (bug real encontrado el 23/08 probando en campo: los archivos
-# terminaban en .../By_Date/By_Date/<fecha>/... en vez de .../By_Date/<fecha>/...).
+DRIVE_SUBCARPETA = Detecciones
 AUDIO_ROOT = /home/lsd/BirdSongs/Extracted
+
+# Tarjeta ALSA (o "default" para dejar que PulseAudio resuelva) y
+# cantidad de canales del microfono -- mismos valores que
+# REC_CARD/CHANNELS en /etc/birdnet/birdnet.conf de BirdNET-Pi para este
+# mismo dispositivo, si ya estaba instalado.
+REC_CARD = default
+CHANNELS = 2
