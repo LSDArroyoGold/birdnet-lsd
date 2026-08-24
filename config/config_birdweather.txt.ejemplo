@@ -1,0 +1,6 @@
+# Copiar a config_birdweather.txt (sin el .ejemplo) y completar con los
+# datos reales del dispositivo. config_birdweather.txt NO se commitea
+# (ver .gitignore) -- son datos del dispositivo, no del algoritmo.
+BIRDWEATHER_ID =
+LATITUDE =
+LONGITUDE =

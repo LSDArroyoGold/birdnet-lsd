@@ -43,6 +43,25 @@ def cargar_config(path):
     }
 
 
+def cargar_config_birdweather(path):
+    """path: config/config_birdweather.txt (no config_birdweather.txt.ejemplo,
+    ese es solo la plantilla). Devuelve BIRDWEATHER_ID vacio si el archivo
+    no existe todavia -- birdweather.enviar_deteccion() ya sabe no hacer
+    nada en ese caso, igual que BirdNET-Pi cuando no esta configurado."""
+    if not os.path.isfile(path):
+        return {'BIRDWEATHER_ID': '', 'LATITUDE': '', 'LONGITUDE': ''}
+    parser = configparser.ConfigParser()
+    with open(path) as f:
+        contenido = '[DEFAULT]\n' + f.read()
+    parser.read_string(contenido)
+    c = parser['DEFAULT']
+    return {
+        'BIRDWEATHER_ID': c.get('BIRDWEATHER_ID', fallback='').strip(),
+        'LATITUDE': c.get('LATITUDE', fallback='').strip(),
+        'LONGITUDE': c.get('LONGITUDE', fallback='').strip(),
+    }
+
+
 class DetectorActividad:
     """Chequeo liviano (sin red neuronal) de si hay actividad acustica en
     un tramo de audio, usando la banda y el umbral relativo al piso de

@@ -4,3 +4,4 @@ __pycache__/
 modelo/*.tflite
 modelo/*_Labels.txt
 modelo/stock_regional_meta.json
+config/config_birdweather.txt
