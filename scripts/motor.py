@@ -19,6 +19,7 @@ import time
 from datetime import datetime
 
 import numpy as np
+from scipy.signal import filtfilt, iirnotch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio_io
@@ -44,13 +45,52 @@ def cargar_duracion_bloque(path):
     return parser['DEFAULT'].getfloat('DURACION_BLOQUE_S', fallback=5.0)
 
 
-def leer_bloques_arecord(rec_card, channels, duracion_bloque_s):
+def cargar_config_filtro_50hz(path):
+    """Lee FILTRO_50HZ_HABILITADO/FILTRO_50HZ_FRECUENCIAS de
+    config_deteccion.txt. Confirmado el 24/08 con ruido real capturado del
+    mic de tector2: pico angosto y fuerte en 50Hz (+25.4dB sobre las
+    frecuencias vecinas, firma tipica de ruido de red electrica argentina)
+    y su 3er armonico en 150Hz (+29.9dB) -- 60Hz (no armonico de 50Hz) no
+    mostro nada, asi que es especificamente esto, no ruido grave en
+    general."""
+    parser = configparser.ConfigParser()
+    with open(path) as f:
+        contenido = '[DEFAULT]\n' + f.read()
+    parser.read_string(contenido)
+    c = parser['DEFAULT']
+    habilitado = c.getboolean('FILTRO_50HZ_HABILITADO', fallback=False)
+    frecuencias = [float(f) for f in c.get('FILTRO_50HZ_FRECUENCIAS', fallback='50,100,150').split(',')]
+    return habilitado, frecuencias
+
+
+def construir_filtro_50hz(frecuencias, sr=SR, q=30):
+    """Un notch angosto (scipy.signal.iirnotch) por frecuencia, para
+    aplicar en cascada -- Q=30 lo mantiene LOCALIZADO: medido el 24/08,
+    el corte real en 50/100/150Hz fue de -16.6 a -19.6dB, mientras que en
+    las frecuencias intermedias (75/125/175Hz) el corte fue de solo -2.6 a
+    -5.7dB (residual normal de cualquier notch real, no un pasa-banda
+    ancho que se coma 50-150Hz entero)."""
+    return [iirnotch(f, q, sr) for f in frecuencias]
+
+
+def aplicar_filtro_50hz(audio, filtros):
+    for b, a in filtros:
+        audio = filtfilt(b, a, audio)
+    return audio
+
+
+def leer_bloques_arecord(rec_card, channels, duracion_bloque_s, filtro_50hz=None):
     """Generador infinito de (bloque_mono_float32, timestamp_inicio_bloque),
     leidos en vivo desde ALSA via arecord -- mismo binario y mismos
     parametros de captura (S16_LE, 48kHz) que usa birdnet_recording.sh de
     BirdNET-Pi. Si arecord se cae (mic desconectado, error de ALSA), se
     reintenta solo despues de una pausa en vez de tirar abajo el motor
-    entero -- un corte de audio no debe matar el proceso."""
+    entero -- un corte de audio no debe matar el proceso.
+
+    filtro_50hz: lista de (b, a) de construir_filtro_50hz(), o None para
+    no filtrar -- aplicado aca, lo mas cerca posible del mic, para que
+    tanto el disparador/acumulador como el audio exportado vean el mismo
+    audio ya limpio."""
     frame_bytes = 2 * channels  # S16_LE = 2 bytes por muestra por canal
     bloque_bytes = int(SR * duracion_bloque_s) * frame_bytes
 
@@ -68,6 +108,8 @@ def leer_bloques_arecord(rec_card, channels, duracion_bloque_s):
                 muestras = np.frombuffer(crudo, dtype=np.int16).astype(np.float32) / 32768.0
                 if channels > 1:
                     muestras = muestras.reshape(-1, channels).mean(axis=1)
+                if filtro_50hz is not None:
+                    muestras = aplicar_filtro_50hz(muestras, filtro_50hz)
                 yield muestras, inicio_bloque
         finally:
             proc.kill()
@@ -136,14 +178,18 @@ def main():
     )
     acumulador = AcumuladorEventos(config_det, duracion_bloque_s=duracion_bloque_s)
 
+    filtro_50hz_on, frecuencias_50hz = cargar_config_filtro_50hz(ruta_config_deteccion)
+    filtro_50hz = construir_filtro_50hz(frecuencias_50hz) if filtro_50hz_on else None
+
     print(
         f"birdnet-lsd arrancando (bloque={duracion_bloque_s}s, "
-        f"card={config_sync['REC_CARD']}, canales={config_sync['CHANNELS']})",
+        f"card={config_sync['REC_CARD']}, canales={config_sync['CHANNELS']}, "
+        f"filtro_50hz={'on ' + str(frecuencias_50hz) if filtro_50hz_on else 'off'})",
         flush=True,
     )
 
     for bloque, timestamp_bloque in leer_bloques_arecord(
-        config_sync['REC_CARD'], config_sync['CHANNELS'], duracion_bloque_s
+        config_sync['REC_CARD'], config_sync['CHANNELS'], duracion_bloque_s, filtro_50hz=filtro_50hz
     ):
         acumulador.procesar_bloque(bloque, timestamp_bloque=timestamp_bloque)
         while acumulador.eventos_terminados:

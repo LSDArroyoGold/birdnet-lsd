@@ -103,3 +103,23 @@ BLOQUES_BUFFER_ANTERIORES = 2
 # implica un piso de ruido (TRIGGER_PERCENTIL_PISO) mas localizado y menos
 # latencia hasta que se evalua si arranco un evento.
 DURACION_BLOQUE_S = 5
+
+# --- Filtro de ruido de red electrica (notch, opcional) ---
+# Confirmado el 24/08 con ruido real capturado del mic de tector2: pico
+# angosto y fuerte en 50Hz (+25.4dB sobre las frecuencias vecinas, firma
+# tipica de ruido de red electrica argentina) y su 3er armonico en 150Hz
+# (+29.9dB) -- 60Hz (no armonico de 50Hz) no mostro nada, asi que es
+# especificamente esto. Se aplica lo mas cerca posible del mic (en
+# leer_bloques_arecord de motor.py), asi tanto el disparador/acumulador
+# como el audio exportado ven el mismo audio ya limpio.
+#
+# Localizado a proposito (notch angosto por frecuencia, Q=30 -- no un
+# pasa-banda ancho que se coma 50-150Hz entero): medido, el corte real en
+# 50/100/150Hz fue de -16.6 a -19.6dB, mientras que en las frecuencias
+# intermedias (75/125/175Hz) el corte fue de solo -2.6 a -5.7dB.
+#
+# Apagado por defecto en el repo (no se probo en el sitio de despliegue
+# de campo real todavia, solo en la mesa de trabajo) -- activar por
+# dispositivo si se confirma el mismo problema ahi.
+FILTRO_50HZ_HABILITADO = false
+FILTRO_50HZ_FRECUENCIAS = 50,100,150
