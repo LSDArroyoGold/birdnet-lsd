@@ -3,7 +3,18 @@
 # proyecto: KEY = valor, editable en caliente sin tocar codigo.
 
 # --- Clasificacion (modelo BirdNET) ---
-CONFIDENCE = 0.6
+# CONFIDENCE bajado de 0.6 a 0.5 el 24/08, calibrado con un barrido offline
+# sobre los 255 tests de la sesion nocturna (re-clasificando el audio
+# fuente directo, sin pasar por parlante/mic -- mide la calibracion propia
+# del modelo). La precision se mantiene practicamente plana entre 0.30 y
+# 0.60 (86.7% a 88.6%, menos de 2 puntos) mientras el recall cae fuerte en
+# ese mismo tramo (84.3% a 79.6%) -- bajar a 0.5 recupera ~2 puntos de
+# recall (79.6% -> 81.6%) por solo 0.5 puntos de precision (88.6% -> 88.1%).
+# Ver Reporte_sesion_nocturna_24-08-2026.md, seccion "Analisis offline
+# post-sesion" para el barrido completo. Caveat: mide calibracion del
+# modelo sobre audio limpio, no la cadena acustica en vivo -- confirmar
+# con datos reales de campo si la relacion precision/recall se sostiene.
+CONFIDENCE = 0.5
 SENSITIVITY = 1.1
 
 # --- Disparador de actividad acustica (NO es el clasificador de especies,
