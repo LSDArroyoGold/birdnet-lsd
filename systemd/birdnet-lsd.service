@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=lsd
+Environment=XDG_RUNTIME_DIR=/run/user/__UID_LSD__
 WorkingDirectory=__BASE_PATH__
 ExecStart=__BASE_PATH__/venv/bin/python3 __BASE_PATH__/scripts/motor.py
 Restart=always
