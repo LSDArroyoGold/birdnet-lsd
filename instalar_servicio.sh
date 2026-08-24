@@ -28,6 +28,11 @@ sudo chmod 644 /etc/systemd/system/$UNIDAD
 sudo systemctl daemon-reload
 sudo systemctl enable $UNIDAD
 
+echo "==> Registrando rotacion de motor.log (semanal, 8 semanas, copytruncate --"
+echo "    el proceso mantiene el archivo abierto via el redirect de systemd, asi"
+echo "    que hace falta copiar+truncar en vez de mover+recrear)"
+sed "s|__BASE_PATH__|$SCRIPT_DIR|g" "$SCRIPT_DIR/systemd/motor.logrotate" | sudo tee /etc/logrotate.d/birdnet-lsd > /dev/null
+
 echo ""
 echo "==> Listo. Para arrancarlo ahora:"
 echo "    sudo systemctl start $UNIDAD"
