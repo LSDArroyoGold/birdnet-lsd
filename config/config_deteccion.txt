@@ -1,0 +1,50 @@
+# Parametros del motor de deteccion propio (loop custom, no BirdNET-Pi).
+# Mismo formato que config_general.txt / config_horarios.txt del resto del
+# proyecto: KEY = valor, editable en caliente sin tocar codigo.
+
+# --- Clasificacion (modelo BirdNET) ---
+CONFIDENCE = 0.6
+SENSITIVITY = 1.1
+
+# --- Disparador de actividad acustica (NO es el clasificador de especies,
+# es un chequeo de señal liviano que corre continuo sobre el audio
+# entrante para decidir "esta pasando algo ahi"). Banda encontrada
+# empiricamente el 22/08 comparando canto confirmado de 195 especies
+# (Xeno-canto) contra ruido de campo real: contraste maximo en banda
+# angosta 3500-4500Hz (34.9dB), pero se usa una banda mas ancha a
+# proposito para no depender de que el canto de cada especie caiga justo
+# en el pico -- el contraste se mantiene fuerte (24-29dB) en todo este
+# rango. Recortada arriba de 9000 a 8000Hz porque la energia vocal real
+# cae fuerte por encima de 8kHz sin ganar contraste a cambio.
+TRIGGER_BANDA_MIN_HZ = 1500
+TRIGGER_BANDA_MAX_HZ = 8000
+
+# Percentil usado como "piso de ruido" propio de cada ventana de analisis
+# (no un valor absoluto -- se adapta al ruido de fondo real del momento) y
+# cuantos dB por encima de ese piso hace falta para contar como actividad.
+TRIGGER_PERCENTIL_PISO = 20
+TRIGGER_MARGEN_DB = 8
+
+# --- Acumulacion del evento completo ---
+# Cuanto silencio sostenido (sin actividad) hace falta para decidir que el
+# canto termino. Mas alto = menos riesgo de cortar un canto con pausas
+# naturales entre frases, a costa de un poco mas de latencia/audio de mas.
+SILENCIO_FIN_EVENTO_S = 1.0
+
+# Cuanto de ese silencio de espera queda realmente guardado al final del
+# audio exportado, como aire despues del ultimo sonido real (el resto se
+# recorta) -- porcentaje de SILENCIO_FIN_EVENTO_S, no un numero fijo, para
+# que se reescale solo si se cambia el valor de arriba.
+MARGEN_FINAL_PCT = 25
+
+# Tope de seguridad: ningun evento se deja crecer mas que esto, pase lo
+# que pase. Calibrado con la distribucion real de duracion de canto de 195
+# especies (22/08): cubre incluso a las especies mas exigentes (Haematopus
+# palliatus con p90 de ~22s) con margen.
+DURACION_MAXIMA_EVENTO_S = 30
+
+# Cuantos bloques de audio "anteriores" mantener siempre disponibles en el
+# buffer rodante (sobrescribiendose), para poder reconstruir el inicio real
+# de un canto aunque el disparo haya caido en medio de el, o cuando el
+# evento sigue creciendo y cruza al bloque siguiente.
+BLOQUES_BUFFER_ANTERIORES = 2

@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+modelo/*.tflite
+modelo/*_Labels.txt
+modelo/stock_regional_meta.json
