@@ -38,10 +38,17 @@ def subir_deteccion(config_sync, ruta_local, carpeta_relativa, nombre_archivo, t
     carpeta_relativa='By_Date/2026-08-23/Rufous_Hornero'.
 
     Sube un solo archivo (copyto, no copy de todo el arbol) al mismo
-    destino que ya usan cierre_amanecer.sh/cierre_atardecer.sh
-    (gdrive:$DRIVE_PATH/Detecciones/By_Date/...) -- cualquier barrido
-    periodico que siga corriendo por fuera encuentra el archivo ya
-    arriba y no hace nada de mas (rclone copy es idempotente).
+    destino que ya usan cierre_amanecer.sh/cierre_atardecer.sh: esos
+    scripts hacen `rclone copy .../By_Date/ gdrive:$DRIVE_PATH/Detecciones`
+    -- con la barra final, rclone copia el CONTENIDO de By_Date, no la
+    carpeta en si, asi que "By_Date" nunca llega a Drive (el destino real
+    termina siendo gdrive:$DRIVE_PATH/Detecciones/<fecha>/<especie>/...).
+    Aca se pisa el mismo comportamiento a mano, sacando el primer
+    componente ("By_Date") de carpeta_relativa antes de armar el destino
+    -- localmente el archivo si se guarda bajo By_Date/ (ver AUDIO_ROOT en
+    motor.py), eso no cambia, es solo el destino remoto el que lo omite.
+    Cualquier barrido periodico que siga corriendo por fuera encuentra el
+    archivo ya arriba y no hace nada de mas (rclone copy es idempotente).
 
     Mismo timeout defensivo que el resto de las llamadas a rclone del
     proyecto (ver nota sobre la cuota compartida en el README de
@@ -56,7 +63,12 @@ def subir_deteccion(config_sync, ruta_local, carpeta_relativa, nombre_archivo, t
     if not remote or not drive_path:
         return False
 
-    destino = f'{remote}:{drive_path}/Detecciones/{carpeta_relativa}/{nombre_archivo}'
+    partes = carpeta_relativa.split(os.sep)
+    if partes and partes[0] == 'By_Date':
+        partes = partes[1:]
+    carpeta_relativa_remota = '/'.join(partes)
+
+    destino = f'{remote}:{drive_path}/Detecciones/{carpeta_relativa_remota}/{nombre_archivo}'
     env = os.environ.copy()
     if config_sync.get('RCLONE_CONFIG'):
         env['RCLONE_CONFIG'] = config_sync['RCLONE_CONFIG']

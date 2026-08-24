@@ -96,9 +96,12 @@ Esto reemplaza dos mecanismos periodicos anteriores:
 
 `scripts/drive.py` sube un solo archivo por vez (`rclone copyto`, no un
 barrido del arbol entero) al mismo destino que ya usan esos scripts
-(`gdrive:$DRIVE_PATH/Detecciones/By_Date/...`), asi que si algun barrido
-periodico viejo sigue corriendo por fuera no rompe nada -- encuentra el
-archivo ya arriba y no hace nada de mas (`rclone copy` es idempotente).
+(`gdrive:$DRIVE_PATH/Detecciones/<fecha>/<especie>/...` -- sin "By_Date",
+que es una carpeta puramente local: `rclone copy .../By_Date/ destino`
+copia el contenido de esa carpeta, no la carpeta en si, asi que nunca
+llegaba a Drive), asi que si algun barrido periodico viejo sigue
+corriendo por fuera no rompe nada -- encuentra el archivo ya arriba y no
+hace nada de mas (`rclone copy` es idempotente).
 Mismo timeout defensivo de 90s que el resto de las llamadas a rclone del
 proyecto, por la cuota compartida de Google (ver nota al respecto en el
 README de LSD-Tector1.1).
