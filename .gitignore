@@ -5,3 +5,4 @@ modelo/*.tflite
 modelo/*_Labels.txt
 modelo/stock_regional_meta.json
 config/config_birdweather.txt
+config/config_sincronizacion.txt

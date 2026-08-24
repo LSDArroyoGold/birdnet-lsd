@@ -1,0 +1,11 @@
+# Copiar a config_sincronizacion.txt (sin el .ejemplo) y completar con los
+# datos reales del dispositivo. config_sincronizacion.txt NO se commitea
+# (ver .gitignore) -- son datos del dispositivo, no del algoritmo.
+#
+# DRIVE_PATH es el mismo valor que ya vive en config_general.txt de
+# LSD-Tector1.1/2.0 (variable DRIVE_PATH) -- se duplica aca porque
+# birdnet-lsd es un repo aparte, sin acceso a esos otros config.
+RCLONE_CONFIG = /home/lsd/.config/rclone/rclone.conf
+DRIVE_REMOTE = gdrive
+DRIVE_PATH =
+AUDIO_ROOT = /home/lsd/BirdSongs/Extracted/By_Date

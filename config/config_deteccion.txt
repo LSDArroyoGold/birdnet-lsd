@@ -54,3 +54,18 @@ DURACION_MAXIMA_EVENTO_S = 30
 # de un canto aunque el disparo haya caido en medio de el, o cuando el
 # evento sigue creciendo y cruza al bloque siguiente.
 BLOQUES_BUFFER_ANTERIORES = 2
+
+# --- Captura de audio en vivo (scripts/motor.py) ---
+# Mismos parametros que usa birdnet_recording.sh de BirdNET-Pi para el
+# mismo dispositivo (ver /etc/birdnet/birdnet.conf): tarjeta ALSA (o
+# "default" para dejar que PulseAudio resuelva) y cantidad de canales.
+REC_CARD = default
+CHANNELS = 2
+
+# Duracion de cada bloque leido de arecord antes de pasarlo a
+# AcumuladorEventos.procesar_bloque(). No tiene relacion con
+# DURACION_MAXIMA_EVENTO_S ni con el bloque de 15s de BirdNET-Pi -- el
+# acumulador ya cruza bloques sin problema, asi que un bloque chico solo
+# implica un piso de ruido (TRIGGER_PERCENTIL_PISO) mas localizado y menos
+# latencia hasta que se evalua si arranco un evento.
+DURACION_BLOQUE_S = 5

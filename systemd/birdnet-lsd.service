@@ -1,0 +1,17 @@
+[Unit]
+Description=birdnet-lsd - motor de deteccion propio (grabacion + clasificacion + sincronizacion event-driven)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lsd
+WorkingDirectory=__BASE_PATH__
+ExecStart=__BASE_PATH__/venv/bin/python3 __BASE_PATH__/scripts/motor.py
+Restart=always
+RestartSec=5
+StandardOutput=append:__BASE_PATH__/motor.log
+StandardError=append:__BASE_PATH__/motor.log
+
+[Install]
+WantedBy=multi-user.target
