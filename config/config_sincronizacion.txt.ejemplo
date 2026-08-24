@@ -8,4 +8,8 @@
 RCLONE_CONFIG = /home/lsd/.config/rclone/rclone.conf
 DRIVE_REMOTE = gdrive
 DRIVE_PATH =
-AUDIO_ROOT = /home/lsd/BirdSongs/Extracted/By_Date
+# OJO: sin "/By_Date" al final -- exportador.nombre_archivo() ya arma la
+# carpeta_relativa empezando con "By_Date/...", asi que sumarlo aca lo
+# duplica (bug real encontrado el 23/08 probando en campo: los archivos
+# terminaban en .../By_Date/By_Date/<fecha>/... en vez de .../By_Date/<fecha>/...).
+AUDIO_ROOT = /home/lsd/BirdSongs/Extracted
