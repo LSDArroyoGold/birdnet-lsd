@@ -39,6 +39,19 @@ class Clasificador:
         distinto al de custom-v1), asi que se aplica aca en el codigo."""
         with open(labels_path) as f:
             self.labels = [l.strip() for l in f]
+
+        # Tabla cientifico -> comun, construida de las propias labels: las
+        # entradas ORIGINALES (no reentrenadas) vienen en formato
+        # "Cientifico_Comun"; las reentrenadas (bare) son solo el nombre
+        # cientifico, sin comun. Para poder nombrar archivos de forma
+        # consistente con el resto del sistema (que usa nombre comun en
+        # todos lados) hace falta resolver el comun tambien para esas.
+        self.sci_a_comun = {}
+        for l in self.labels:
+            if '_' in l:
+                sci, com = l.split('_', 1)
+                self.sci_a_comun[sci.strip()] = com.strip()
+
         self.interp = tflite.Interpreter(model_path)
         self.interp.allocate_tensors()
         self.inp = self.interp.get_input_details()
@@ -97,6 +110,19 @@ class Clasificador:
             else:
                 resultado.append((None, 0.0))
         return resultado
+
+    def nombre_comun_de(self, label):
+        """Nombre comun para cualquier label, sea original ("Cientifico_Comun")
+        o reentrenada bare ("Cientifico" solo) -- resuelve siempre al mismo
+        nombre comun para una especie, sin importar que neurona la disparo."""
+        if '_' in label:
+            return label.split('_', 1)[1].strip()
+        return self.sci_a_comun.get(label.strip(), label.strip())
+
+    def nombre_comun_seguro(self, label):
+        """Version 'safe' para nombre de archivo/carpeta, mismo criterio que
+        common_name_safe de BirdNET-Pi: espacios -> guion bajo, sin comillas."""
+        return self.nombre_comun_de(label).replace("'", "").replace(' ', '_')
 
     def analizar_ventanas_todas(self, audio, paso_s=1.0):
         """Igual que analizar_ventanas, pero SIN filtrar por CONFIDENCE --
@@ -228,6 +254,7 @@ class Clasificador:
 
         return {
             'especie': self.labels[idx_top],
+            'especie_comun': self.nombre_comun_de(self.labels[idx_top]),
             'confianza': float(confianza),
             'racha_maxima': largo,
             'confianza_baja': largo == 1,

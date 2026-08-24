@@ -97,7 +97,7 @@ for a, b in pares:
     if not acumulador.eventos_terminados:
         nuevo_r = None
     else:
-        evento = max(acumulador.eventos_terminados, key=len)
+        evento = max(acumulador.eventos_terminados, key=lambda e: len(e['audio']))['audio']
         nuevo_r = clasificador.clasificar_evento(evento)
 
     nuevo_es_hornero = es(nuevo_r, 'Furnarius rufus')

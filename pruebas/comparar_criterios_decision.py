@@ -97,7 +97,7 @@ for a, b in pares:
     if not acumulador.eventos_terminados:
         ventanas = []
     else:
-        evento = max(acumulador.eventos_terminados, key=len)
+        evento = max(acumulador.eventos_terminados, key=lambda e: len(e['audio']))['audio']
         ventanas = clasificador.analizar_ventanas(evento, paso_s=1.0)
 
     for metodo in METODOS:

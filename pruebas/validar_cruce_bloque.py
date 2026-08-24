@@ -52,7 +52,7 @@ for f in archivos:
         nuevo_dice_hornero = False
         nuevo_r = None
     else:
-        evento = max(acumulador.eventos_terminados, key=len)  # el evento principal
+        evento = max(acumulador.eventos_terminados, key=lambda e: len(e['audio']))['audio']  # el evento principal
         nuevo_r = clasificador.clasificar_evento(evento)
         nuevo_dice_hornero = bool(nuevo_r and 'Furnarius rufus' in nuevo_r['especie'] and nuevo_r['detectado'])
 

@@ -15,6 +15,7 @@ validada la logica.
 """
 import configparser
 import os
+from datetime import timedelta
 import numpy as np
 import librosa
 from scipy.signal import butter, sosfiltfilt
@@ -88,8 +89,9 @@ class AcumuladorEventos:
         self.n_buffer = config['BLOQUES_BUFFER_ANTERIORES']
 
         self.evento_audio = None       # None = no hay evento en curso
+        self.timestamp_inicio_evento = None  # datetime real del inicio del evento en curso
         self.muestras_desde_ultima_actividad = 0
-        self.eventos_terminados = []   # lista de arrays de audio, uno por evento
+        self.eventos_terminados = []   # lista de {'audio':..., 'timestamp_inicio':...}, uno por evento
 
     def _silencio_maximo_muestras(self):
         return int(self.config['SILENCIO_FIN_EVENTO_S'] * SR)
@@ -97,11 +99,15 @@ class AcumuladorEventos:
     def _maximo_evento_muestras(self):
         return int(self.config['DURACION_MAXIMA_EVENTO_S'] * SR)
 
-    def procesar_bloque(self, bloque):
+    def procesar_bloque(self, bloque, timestamp_bloque=None):
         """bloque: array de audio de ~duracion_bloque_s segundos, en el
-        orden real en que se grabo (bloques contiguos, sin salto)."""
+        orden real en que se grabo (bloques contiguos, sin salto).
+        timestamp_bloque: datetime real del INICIO de este bloque (hora de
+        pared) -- opcional; sin el, los eventos quedan sin timestamp (util
+        para pruebas offline, pero en produccion hace falta para poder
+        nombrar el archivo final)."""
         if self.evento_audio is None:
-            self._buscar_disparo(bloque)
+            self._buscar_disparo(bloque, timestamp_bloque)
         else:
             self._continuar_evento(bloque)
 
@@ -109,7 +115,7 @@ class AcumuladorEventos:
         if len(self.buffer_bloques) > self.n_buffer:
             self.buffer_bloques.pop(0)
 
-    def _buscar_disparo(self, bloque):
+    def _buscar_disparo(self, bloque, timestamp_bloque):
         mascara, tiempos = self.detector.mascara_actividad(bloque)
         if not mascara.any():
             return
@@ -126,6 +132,13 @@ class AcumuladorEventos:
         audio_total_disponible = np.concatenate([contexto_previo, bloque]) if len(contexto_previo) else bloque
         self.evento_audio = audio_total_disponible[max(0, inicio_absoluto_muestra):]
         self.muestras_desde_ultima_actividad = 0
+        # el disparo se detecta siempre dentro del bloque ACTUAL (mascara_actividad
+        # corre solo sobre `bloque`, no sobre el contexto previo), asi que la hora
+        # real del inicio es la hora del bloque actual + el offset encontrado ahi.
+        if timestamp_bloque is not None:
+            self.timestamp_inicio_evento = timestamp_bloque + timedelta(seconds=inicio_s)
+        else:
+            self.timestamp_inicio_evento = None
         self._chequear_fin_o_continuar(bloque_actual_ya_incluido=True)
 
     def _continuar_evento(self, bloque):
@@ -158,8 +171,12 @@ class AcumuladorEventos:
                 margen_s = self.config['SILENCIO_FIN_EVENTO_S'] * (self.config['MARGEN_FINAL_PCT'] / 100.0)
                 fin_muestra = min(len(audio_final), int((fin_s + margen_s) * SR))
                 audio_final = audio_final[:fin_muestra]
-        self.eventos_terminados.append(audio_final)
+        self.eventos_terminados.append({
+            'audio': audio_final,
+            'timestamp_inicio': self.timestamp_inicio_evento,
+        })
         self.evento_audio = None
+        self.timestamp_inicio_evento = None
 
     def finalizar(self):
         """Llamar al terminar el stream (o al apagar el dispositivo) para
