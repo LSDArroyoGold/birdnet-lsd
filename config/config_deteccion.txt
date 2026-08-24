@@ -44,10 +44,21 @@ SILENCIO_FIN_EVENTO_S = 1.5
 MARGEN_FINAL_PCT = 25
 
 # Tope de seguridad: ningun evento se deja crecer mas que esto, pase lo
-# que pase. Calibrado con la distribucion real de duracion de canto de 195
-# especies (22/08): cubre incluso a las especies mas exigentes (Haematopus
-# palliatus con p90 de ~22s) con margen.
-DURACION_MAXIMA_EVENTO_S = 30
+# que pase (es red de seguridad, no el mecanismo normal de cierre -- lo
+# normal es que un evento cierre antes por SILENCIO_FIN_EVENTO_S).
+# Revisado el 24/08: el valor original (30s, calibrado con p90~22s de
+# Haematopus palliatus) no cubria a las Calandrias (genero Mimus, dos
+# especies en la lista local) -- research de literatura confirma que los
+# sinsontes (mismo genero, Mimus polyglottos) cantan 10+ minutos seguidos,
+# y los datos propios de AMBA_test ya mostraban Mimus triurus con mediana
+# de 37.5s, p90 de 46.1s y maximo de 68s (70% de los archivos ya superaban
+# los 30s viejos). Subido a 60s -- no cubre el maximo extremo observado
+# (68s) pero es la mejora practica elegida sobre el valor anterior, dado
+# que es un caso limite raro y esto es una red de seguridad, no el cierre
+# habitual. No hace falta agrandar BLOQUES_BUFFER_ANTERIORES por este
+# cambio -- ese buffer solo importa ANTES del disparo, un evento ya en
+# curso no lo usa para seguir creciendo.
+DURACION_MAXIMA_EVENTO_S = 60
 
 # Peso del piso de referencia "viejo" en el promedio movil que lo actualiza
 # bloque a bloque mientras dura un evento (1.0 = nunca se actualiza, queda
