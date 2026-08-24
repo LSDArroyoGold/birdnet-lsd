@@ -19,6 +19,19 @@ SENSITIVITY = 1.1
 TRIGGER_BANDA_MIN_HZ = 1500
 TRIGGER_BANDA_MAX_HZ = 8000
 
+# Punto ciego conocido y aceptado: especies con vocalizacion grave (Anser
+# anser, Jacana jacana, Cinclodes fuscus -- mediana espectral ~90-100Hz,
+# medido el 24/08) quedan fuera de esta banda. Se probo agregar un segundo
+# canal grave (60-300Hz) en paralelo -- implementado, revertido el mismo
+# dia: medido con reproduccion real por parlante + captura con el mic del
+# dispositivo (no solo synthetic), el contraste señal-vs-ruido en 40-300Hz
+# resulto practicamente nulo (entre -0.6 y -2.2dB en todas las bandas
+# probadas), probablemente por la caida de graves del parlante de prueba y
+# el propio ruido de fondo en esa zona. No hay banda/margen calibrados que
+# recomendar con el equipo de prueba disponible -- si se retoma, hace
+# falta una fuente de graves real (subwoofer, o un encuentro real
+# grabado), no un parlante de laptop.
+
 # Percentil usado como "piso de ruido" propio de cada ventana de analisis
 # (no un valor absoluto -- se adapta al ruido de fondo real del momento) y
 # cuantos dB por encima de ese piso hace falta para contar como actividad.
