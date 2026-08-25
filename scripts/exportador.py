@@ -10,14 +10,21 @@ import os
 
 
 def nombre_archivo(resultado, timestamp_inicio, extension='mp3'):
-    """resultado: el dict que devuelve Clasificador.decidir_confianza_racha
+    r"""resultado: el dict que devuelve Clasificador.decidir_confianza_racha
     (necesita 'especie_comun' y 'confianza'). timestamp_inicio: datetime
     real del inicio del evento (viene de AcumuladorEventos, propagado desde
     procesar_bloque(..., timestamp_bloque=...)).
 
     Devuelve (nombre_archivo, carpeta_relativa), ej:
-    ('Rufous_Hornero-92-2026-08-23-birdnet-09_52_26.mp3',
+    ('Rufous_Hornero-92-2026-08-23-birdnet-09:52:26.mp3',
      'By_Date/2026-08-23/Rufous_Hornero')
+
+    La hora usa ":" (no "_") para que la regex vieja de conteo en
+    cierre_amanecer.sh/cierre_atardecer.sh (grep -oP "birdnet-\K[0-9]{2}:[0-9]{2}",
+    heredada de BirdNET-Pi) siga funcionando sin tocarla -- extrae HH:MM
+    igual aunque el nombre tenga tambien los segundos despues (bug real
+    encontrado el 25/08: con "_" la regex nunca matcheaba, "Detecciones
+    subidas" quedaba en 0 aunque el motor si estuviera detectando).
     """
     if timestamp_inicio is None:
         raise ValueError(
@@ -29,7 +36,7 @@ def nombre_archivo(resultado, timestamp_inicio, extension='mp3'):
     nombre_comun_seguro = resultado['especie_comun'].replace("'", "").replace(' ', '_')
     confianza_pct = round(resultado['confianza'] * 100)
     fecha = timestamp_inicio.strftime('%Y-%m-%d')
-    hora = timestamp_inicio.strftime('%H_%M_%S')
+    hora = timestamp_inicio.strftime('%H:%M:%S')
 
     nombre = f'{nombre_comun_seguro}-{confianza_pct}-{fecha}-birdnet-{hora}.{extension}'
     carpeta_relativa = os.path.join('By_Date', fecha, nombre_comun_seguro)
