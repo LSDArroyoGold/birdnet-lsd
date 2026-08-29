@@ -2,20 +2,55 @@
 # Mismo formato que config_general.txt / config_horarios.txt del resto del
 # proyecto: KEY = valor, editable en caliente sin tocar codigo.
 
-# --- Clasificacion (modelo BirdNET) ---
-# CONFIDENCE bajado de 0.6 a 0.5 el 24/08, calibrado con un barrido offline
-# sobre los 255 tests de la sesion nocturna (re-clasificando el audio
-# fuente directo, sin pasar por parlante/mic -- mide la calibracion propia
-# del modelo). La precision se mantiene practicamente plana entre 0.30 y
-# 0.60 (86.7% a 88.6%, menos de 2 puntos) mientras el recall cae fuerte en
-# ese mismo tramo (84.3% a 79.6%) -- bajar a 0.5 recupera ~2 puntos de
-# recall (79.6% -> 81.6%) por solo 0.5 puntos de precision (88.6% -> 88.1%).
-# Ver Reporte_sesion_nocturna_24-08-2026.md, seccion "Analisis offline
-# post-sesion" para el barrido completo. Caveat: mide calibracion del
-# modelo sobre audio limpio, no la cadena acustica en vivo -- confirmar
-# con datos reales de campo si la relacion precision/recall se sostiene.
+# --- Clasificacion ---
+# Modelo cambiado el 29/08/2026: BirdNET reentrenado (tflite) retirado
+# por completo -- sobre-disparaba de forma estructural (etiquetaba
+# practicamente cualquier cosa como Hornero, no un problema de
+# calibracion fina). Reemplazado por TectorNet: Perch 2.0 ONNX decide,
+# BirdSet EfficientNetB1 ONNX confirma sin sesgo (ver
+# clasificador_tectornet.py). El historial de calibracion de CONFIDENCE
+# de abajo es de la epoca de BirdNET -- se mantiene el mismo valor de
+# partida (0.5) para TectorNet porque no esta re-calibrado especificamente
+# contra esta arquitectura nueva todavia (pendiente, ver README).
+#
+# CONFIDENCE bajado de 0.6 a 0.5 el 24/08 (con BirdNET), calibrado con un
+# barrido offline sobre los 255 tests de la sesion nocturna
+# (re-clasificando el audio fuente directo, sin pasar por parlante/mic --
+# mide la calibracion propia del modelo). La precision se mantenia
+# practicamente plana entre 0.30 y 0.60 (86.7% a 88.6%, menos de 2 puntos)
+# mientras el recall caia fuerte en ese mismo tramo (84.3% a 79.6%) --
+# bajar a 0.5 recuperaba ~2 puntos de recall (79.6% -> 81.6%) por solo 0.5
+# puntos de precision (88.6% -> 88.1%). Ver
+# Reporte_sesion_nocturna_24-08-2026.md, seccion "Analisis offline
+# post-sesion" para el barrido completo (especifico de BirdNET, no de
+# TectorNet).
 CONFIDENCE = 0.5
+
+# SENSITIVITY: especifico del escalado del Clasificador BirdNET viejo,
+# ClasificadorTectorNet NO LO USA. Se deja en el archivo solo porque
+# detector.cargar_config() (reusado sin modificar) lo exige presente en
+# el parseo, sin efecto real.
 SENSITIVITY = 1.1
+
+# ESCALA: multiplica el exponente del sigmoide de Perch2
+# (sigmoid(ESCALA*(logit+bias))). Elegido con un barrido offline sobre
+# 0.10/0.15/0.20/0.25/0.30/0.40 -- 0.15 dio la mejor separacion de
+# confianza entre casos que BirdSet confirma vs no confirma. OJO: en
+# ninguna escala positiva el flag 'detectado' de Perch2 baja de ~87% de
+# los archivos con actividad -- es una propiedad matematica del pipeline
+# (ver clasificador_tectornet.py), no algo que ESCALA pueda arreglar. El
+# filtrado real de calidad lo hace la confirmacion de BirdSet.
+ESCALA = 0.15
+
+# PASO_VENTANA_S: paso entre ventanas consecutivas de 5s (Perch2 escanea
+# todo el evento con este paso; BirdSet reusa el mismo paso sobre el
+# recorte de la racha ganadora de Perch2). Subido de 1.0 a 2.0 el
+# 29/08/2026 -- Diego valido con pruebas propias que el sistema anda
+# igual con este paso mas grande, y reduce a la mitad el numero de
+# ventanas por evento (impacto directo en tiempo de clasificacion: un
+# evento de 20s paso de ~10 ventanas a ~5, sumado al recorte de BirdSet
+# a la racha ganadora -- ver motor.py para las mediciones reales).
+PASO_VENTANA_S = 2.0
 
 # --- Disparador de actividad acustica (NO es el clasificador de especies,
 # es un chequeo de señal liviano que corre continuo sobre el audio
@@ -70,19 +105,21 @@ MARGEN_FINAL_PCT = 25
 # Tope de seguridad: ningun evento se deja crecer mas que esto, pase lo
 # que pase (es red de seguridad, no el mecanismo normal de cierre -- lo
 # normal es que un evento cierre antes por SILENCIO_FIN_EVENTO_S).
-# Revisado el 24/08: el valor original (30s, calibrado con p90~22s de
-# Haematopus palliatus) no cubria a las Calandrias (genero Mimus, dos
-# especies en la lista local) -- research de literatura confirma que los
-# sinsontes (mismo genero, Mimus polyglottos) cantan 10+ minutos seguidos,
-# y los datos propios de AMBA_test ya mostraban Mimus triurus con mediana
-# de 37.5s, p90 de 46.1s y maximo de 68s (70% de los archivos ya superaban
-# los 30s viejos). Subido a 60s -- no cubre el maximo extremo observado
-# (68s) pero es la mejora practica elegida sobre el valor anterior, dado
-# que es un caso limite raro y esto es una red de seguridad, no el cierre
-# habitual. No hace falta agrandar BLOQUES_BUFFER_ANTERIORES por este
-# cambio -- ese buffer solo importa ANTES del disparo, un evento ya en
-# curso no lo usa para seguir creciendo.
-DURACION_MAXIMA_EVENTO_S = 60
+# Historial: 30s (original, calibrado con p90~22s de Haematopus
+# palliatus) -> 60s (24/08, para cubrir Mimus triurus: mediana 37.5s, p90
+# 46.1s, max 68s en AMBA_test) -> 20s (29/08/2026). Bajado de nuevo a 20s
+# en base al analisis de campo real de Diego sobre las grabaciones de
+# tector1 (no sobre el dataset de Xeno-canto de AMBA_test que motivo el
+# valor de 60s) -- ese es el dato que manda para calibrar esto, por ser
+# la actividad real del sitio. Ademas, con TectorNet cada segundo extra
+# de evento es mucho mas caro que con BirdNET tflite (un evento de 60s
+# tardaba 99.74s en clasificarse en el Pi4B real de tector1 antes del
+# recorte de BirdSet a la racha de Perch2 -- ver clasificador_tectornet.py
+# y motor.py), asi que bajar el tope tambien acota el peor caso de
+# latencia por evento. No hace falta agrandar BLOQUES_BUFFER_ANTERIORES
+# por este cambio -- ese buffer solo importa ANTES del disparo, un
+# evento ya en curso no lo usa para seguir creciendo.
+DURACION_MAXIMA_EVENTO_S = 20
 
 # Peso del piso de referencia "viejo" en el promedio movil que lo actualiza
 # bloque a bloque mientras dura un evento (1.0 = nunca se actualiza, queda

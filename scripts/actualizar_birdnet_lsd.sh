@@ -47,18 +47,40 @@ if [ -z "$SHA_REMOTO" ] || [ "$SHA_REMOTO" = "$SHA_ANTERIOR" ]; then
 fi
 
 # Si requirements.txt cambio entre ambos commits, reinstalar dependencias
-# antes de reiniciar el servicio (si no cambio, no hace falta tocar el venv).
+# despues de traer el codigo nuevo (si no cambio, no hace falta tocar el
+# venv). OJO: esto tiene que ir DESPUES del git reset --hard de abajo, no
+# antes -- bug real encontrado el 29/08/2026: con el pip install ANTES del
+# reset, "requirements.txt" en disco todavia era la version VIEJA (el
+# reset no habia corrido todavia), asi que se reinstalaba contra el
+# archivo equivocado y las dependencias nuevas nunca llegaban a instalarse
+# de verdad (el chequeo de salud de mas abajo lo hubiera agarrado -- el
+# import de la dependencia faltante hace fallar la clasificacion de
+# prueba -- pero mejor evitar el revert innecesario de entrada).
+NECESITA_REINSTALAR=0
 if ! git diff --quiet "$SHA_ANTERIOR" "$SHA_REMOTO" -- requirements.txt 2>/dev/null; then
-	"$BIRDNET_LSD_DIR/venv/bin/pip" install -q -r "$BIRDNET_LSD_DIR/requirements.txt" 2>/dev/null
+	NECESITA_REINSTALAR=1
 fi
 
 git reset --hard "$SHA_REMOTO" --quiet
+
+if [ "$NECESITA_REINSTALAR" = "1" ]; then
+	"$BIRDNET_LSD_DIR/venv/bin/pip" install -q -r "$BIRDNET_LSD_DIR/requirements.txt" 2>/dev/null
+fi
 
 chequear_salud() {
 	sudo systemctl restart birdnet-lsd.service
 	sleep 5
 	systemctl is-active --quiet birdnet-lsd.service || return 1
 	pgrep -f "arecord -f S16_LE" > /dev/null || return 1
+
+	# No alcanza con "el proceso esta vivo" -- un clasificador colgado o
+	# demasiado lento (ver motor.py, hilo_clasificador) pasaria este
+	# chequeo igual, porque la captura de audio esta desacoplada de la
+	# clasificacion a proposito. Se corre una clasificacion real sobre un
+	# audio de prueba fijo, con un timeout externo (no un try/except --
+	# eso no protege contra un cuelgue real de onnxruntime, solo contra
+	# una excepcion) para agarrar tanto crashes como cuelgues.
+	timeout 60 "$BIRDNET_LSD_DIR/venv/bin/python3" "$BIRDNET_LSD_DIR/scripts/verificar_clasificador.py" || return 1
 	return 0
 }
 

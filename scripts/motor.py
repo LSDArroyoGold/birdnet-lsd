@@ -1,34 +1,85 @@
 """
-Loop principal en vivo: arecord -> AcumuladorEventos -> Clasificador ->
-audio_io (mp3 a disco) -> BirdWeather + Drive, los dos apenas se genera
-cada deteccion.
+Loop principal en vivo: arecord -> AcumuladorEventos -> ClasificadorTectorNet
+(Perch2 ONNX decide, BirdSet ONNX confirma) -> audio_io (mp3 a disco) ->
+BirdWeather + Drive, los dos apenas se genera cada deteccion.
 
 Reemplaza tanto birdnet_recording.sh + birdnet_analysis.py de BirdNET-Pi
 (grabacion + clasificacion ventana por ventana sin confirmacion) como el
 mecanismo de sincronizacion periodico (sincronizar_detecciones.sh cada 5
 minutos por crontab en LSD-Tector1.1, o el rclone copy del arbol completo
-al cierre de ventana en LSD-Tector2.0): ahora el ciclo completo
-detectar -> guardar -> avisar es un solo evento encadenado por deteccion,
-sin esperar a ningun cron ni a que termine la ventana de grabacion.
+al cierre de ventana en LSD-Tector2.0): el ciclo completo detectar ->
+guardar -> avisar es un solo evento encadenado por deteccion, sin esperar
+a ningun cron ni a que termine la ventana de grabacion.
+
+Cambio de clasificador el 29/08/2026: el modelo BirdNET reentrenado
+(tflite, clasificador.py -- ver tag "pre-tectornet" e historial de git
+para el codigo viejo completo) se retira por completo, reemplazado por
+TectorNet (Perch 2.0 ONNX como decisor + BirdSet EfficientNetB1 ONNX
+como filtro de confirmacion cruzada, sin sesgo). Motivo: revision manual
+encontro que el reentreno sobre-disparaba de forma estructural
+(etiquetaba practicamente cualquier cosa como Hornero). Detalle completo
+de la arquitectura nueva en clasificador_tectornet.py.
+
+Cambio de arquitectura el mismo dia: la captura de audio (leer el pipe de
+arecord) y la clasificacion de eventos ya NO corren en el mismo hilo.
+Motivo, medido en campo el 29/08 sobre tector1 (Pi4B real): clasificar un
+evento de 60s con TectorNet tardaba 99.74s -- mas lento que el propio
+evento, y hasta un evento chico de 4.5s tardaba 5.78s. Con el loop viejo
+(donde procesar_evento() bloqueaba el mismo hilo que lee arecord), esos
+segundos de clasificacion dejaban de leer el pipe de arecord, que tiene
+un buffer chico (tipicamente 64KB en Linux, se llena en fracciones de
+segundo a la tasa de captura real, 48kHz/16-bit/2ch = ~192KB/s) -- al
+llenarse, arecord se bloquea escribiendo y ALSA empieza a perder audio
+real (overrun), justo mientras el sistema esta identificando una
+deteccion. No era un problema con BirdNET tflite (mucho mas liviano),
+pero es inaceptable con TectorNet. Ver hilo_clasificador() y
+COLA_EVENTOS mas abajo.
+
+Estos dos cambios (recorte de BirdSet a la racha de Perch2, paso_s=2.0,
+DURACION_MAXIMA_EVENTO_S=20) redujeron el tiempo de clasificacion medido
+en campo entre 1.6x y 3.6x segun duracion del evento (mayor beneficio en
+eventos largos) -- probado localmente contra 150 archivos reales de
+campo (0 crashes) antes de este despliegue, y confirmado en tector1
+mismo la noche del 29/08 antes de reemplazar el clasificador en
+produccion.
 """
 import configparser
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 
 import numpy as np
+import huggingface_hub
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audio_io
 import birdweather
 import drive
 import exportador
-from clasificador import Clasificador
+from clasificador_tectornet import ClasificadorTectorNet, cargar_config_tectornet
 from detector import SR, AcumuladorEventos, cargar_config, cargar_config_birdweather
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+PERCH2_REPO = "justinchuby/Perch-onnx"
+PERCH2_CHECKPOINT = "perch_v2_no_dft.onnx"
+
+# Tope de eventos pendientes de clasificar antes de empezar a descartar
+# los mas nuevos. No es "cuanto tarda en ponerse al dia" -- es una red de
+# seguridad de memoria: si el clasificador queda sistematicamente mas
+# lento que el ritmo real de eventos, esta cola creceria sin limite y
+# podria agotar la RAM del dispositivo. Cada evento en cola pesa como
+# maximo DURACION_MAXIMA_EVENTO_S (20s) de audio float32 a 48kHz mono,
+# ~3.8MB -- con este tope, ~19MB en el peor caso, nada frente a los
+# ~934MB que ya usan los modelos cargados (medido en tector1, Pi4B, el
+# 29/08). Si se llega a este tope de forma sostenida es señal de que el
+# clasificador no da abasto con la actividad real del sitio, no algo
+# para simplemente subir el numero.
+MAX_COLA_EVENTOS = 5
 
 
 def cargar_duracion_bloque(path):
@@ -76,13 +127,13 @@ def leer_bloques_arecord(rec_card, channels, duracion_bloque_s):
         time.sleep(3)
 
 
-def procesar_evento(clasificador, evento, config_sync, config_bw):
+def procesar_evento(clasificador, evento, config_sync, config_bw, paso_ventana_s=1.0):
     audio = evento['audio']
     timestamp_inicio = evento['timestamp_inicio']
     if timestamp_inicio is None or len(audio) < SR * 1.0:
         return  # evento sin timestamp real o demasiado corto para tener sentido
 
-    ventanas = clasificador.analizar_ventanas_todas(audio)
+    ventanas = clasificador.analizar_ventanas_todas(audio, paso_s=paso_ventana_s)
     resultado = clasificador.decidir_confianza_racha(ventanas, incluir_diagnostico=True)
     if resultado is None:
         print(f"[{timestamp_inicio.isoformat()}] disparador activo, evento sin ventanas "
@@ -98,22 +149,26 @@ def procesar_evento(clasificador, evento, config_sync, config_bw):
     ruta_local = os.path.join(config_sync['AUDIO_ROOT'], carpeta_relativa, nombre)
     audio_io.escribir_mp3(audio, SR, ruta_local)
 
+    if resultado['confirmado_por_birdset']:
+        estado_birdset = 'confirma'
+    else:
+        estado_birdset = f"NO confirma (dijo {resultado['especie_birdset']})"
     print(
         f"[{timestamp_inicio.isoformat()}] {resultado['especie_comun']} "
-        f"({resultado['confianza']:.2f}, racha={resultado['racha_maxima']}) -> {nombre}",
+        f"({resultado['confianza']:.2f}, racha={resultado['racha_maxima']}, "
+        f"BirdSet={estado_birdset}) -> {nombre}",
         flush=True,
     )
 
     if resultado.get('confianza_baja'):
-        # Racha de una sola ventana, sin corroboracion de vecinas -- mas
-        # propensa a error (confirmado el 24/08 probando en campo: un
-        # canto largo real partido en 2 eventos dio una especie
-        # incorrecta con 96% de confianza en el fragmento de racha=1, y
-        # la especie correcta recien en el fragmento con racha=4). No se
-        # descarta la deteccion (sigue guardada local y en Drive como
-        # evidencia), pero no se postea a BirdWeather como si fuera una
-        # identificacion confirmada.
-        print(f"BirdWeather: salteado por confianza_baja (racha=1) -- {resultado['especie_comun']}",
+        # BirdSet (sin sesgo, corriendo sobre el mismo tramo de audio que
+        # gano la racha de Perch2) no confirmo la especie que propuso
+        # Perch2 -- ver clasificador_tectornet.py para la nota completa
+        # sobre por que el umbral propio de Perch2 solo no alcanza como
+        # filtro de calidad. No se descarta la deteccion (sigue guardada
+        # local y en Drive como evidencia), pero no se postea a
+        # BirdWeather como si fuera una identificacion confirmada.
+        print(f"BirdWeather: salteado por confianza_baja (BirdSet no confirmo) -- {resultado['especie_comun']}",
               flush=True)
     else:
         try:
@@ -126,26 +181,61 @@ def procesar_evento(clasificador, evento, config_sync, config_bw):
               file=sys.stderr, flush=True)
 
 
+def hilo_clasificador(cola_eventos, clasificador, config_sync, config_bw, paso_ventana_s):
+    """Corre en un hilo aparte del que lee arecord (ver docstring del
+    modulo). Consume eventos ya delimitados y hace todo el trabajo
+    pesado -- clasificar, guardar mp3, BirdWeather, Drive -- sin
+    bloquear nunca la captura de audio en vivo. onnxruntime libera el
+    GIL durante sess.run() (ejecucion en C++), y las operaciones pesadas
+    de librosa/numpy tambien lo liberan durante las llamadas a BLAS, asi
+    que un hilo (no un proceso aparte) alcanza sin agregar la complejidad
+    de pasar arrays de audio entre procesos."""
+    while True:
+        evento = cola_eventos.get()
+        try:
+            procesar_evento(clasificador, evento, config_sync, config_bw, paso_ventana_s=paso_ventana_s)
+        except Exception as e:
+            print(f'Error procesando evento (sigue el loop): {e}', file=sys.stderr, flush=True)
+        finally:
+            cola_eventos.task_done()
+
+
 def main():
     ruta_config_deteccion = os.path.join(BASE_DIR, 'config/config_deteccion.txt')
     config_det = cargar_config(ruta_config_deteccion)
+    config_det.update(cargar_config_tectornet(ruta_config_deteccion))
     duracion_bloque_s = cargar_duracion_bloque(ruta_config_deteccion)
     config_bw = cargar_config_birdweather(os.path.join(BASE_DIR, 'config/config_birdweather.txt'))
     config_sync = drive.cargar_config_sincronizacion(
         os.path.join(BASE_DIR, 'config/config_sincronizacion.txt'))
 
-    clasificador = Clasificador(
-        os.path.join(BASE_DIR, 'modelo/LSDTector_Classifier_v2.tflite'),
-        os.path.join(BASE_DIR, 'modelo/LSDTector_Classifier_v2_Labels.txt'),
-        config_det,
-        podado_json=os.path.join(BASE_DIR, 'modelo/v10_podado.json'),
-        bias_json=os.path.join(BASE_DIR, 'modelo/stock_regional_meta.json'),
+    print('Descargando/verificando cache de Perch 2.0 ONNX (HuggingFace, primera vez tarda)...', flush=True)
+    perch_onnx_path = huggingface_hub.hf_hub_download(repo_id=PERCH2_REPO, filename=PERCH2_CHECKPOINT)
+
+    clasificador = ClasificadorTectorNet(
+        perch_onnx_path=perch_onnx_path,
+        perch_labels_csv=os.path.join(BASE_DIR, 'modelo/perch2_labels.csv'),
+        birdset_onnx_path=os.path.join(BASE_DIR, 'modelo/birdset_efficientnetb1.onnx'),
+        birdset_config_json=os.path.join(BASE_DIR, 'modelo/birdset_efficientnetb1_config.json'),
+        ebird_taxonomy_json=os.path.join(BASE_DIR, 'modelo/eBird_taxonomy_codes_2024E.json'),
+        config=config_det,
+        bias_json=os.path.join(BASE_DIR, 'config/delta_b_reforzado_v2.json'),
+        escala=config_det['ESCALA'],
     )
     acumulador = AcumuladorEventos(config_det, duracion_bloque_s=duracion_bloque_s)
 
+    cola_eventos = queue.Queue(maxsize=MAX_COLA_EVENTOS)
+    hilo = threading.Thread(
+        target=hilo_clasificador,
+        args=(cola_eventos, clasificador, config_sync, config_bw, config_det['PASO_VENTANA_S']),
+        daemon=True,
+    )
+    hilo.start()
+
     print(
-        f"birdnet-lsd arrancando (bloque={duracion_bloque_s}s, "
-        f"card={config_sync['REC_CARD']}, canales={config_sync['CHANNELS']})",
+        f"birdnet-lsd (TectorNet) arrancando (bloque={duracion_bloque_s}s, escala={config_det['ESCALA']}, "
+        f"paso_ventana={config_det['PASO_VENTANA_S']}s, card={config_sync['REC_CARD']}, "
+        f"canales={config_sync['CHANNELS']})",
         flush=True,
     )
 
@@ -156,9 +246,18 @@ def main():
         while acumulador.eventos_terminados:
             evento = acumulador.eventos_terminados.pop(0)
             try:
-                procesar_evento(clasificador, evento, config_sync, config_bw)
-            except Exception as e:
-                print(f'Error procesando evento (sigue el loop): {e}', file=sys.stderr, flush=True)
+                cola_eventos.put_nowait(evento)
+            except queue.Full:
+                # Ver MAX_COLA_EVENTOS: el clasificador no da abasto con el
+                # ritmo real de eventos. Se descarta el evento MAS NUEVO (no
+                # el mas viejo) para no interrumpir al hilo clasificador a
+                # mitad de un evento que ya empezo a procesar -- prioriza
+                # terminar lo que ya esta en curso antes que sumar mas cola.
+                print(
+                    f'ALERTA: cola de clasificacion llena ({MAX_COLA_EVENTOS} eventos pendientes), '
+                    f'se descarta un evento nuevo -- el clasificador esta mas lento que el ritmo real',
+                    file=sys.stderr, flush=True,
+                )
 
 
 if __name__ == '__main__':

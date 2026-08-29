@@ -1,10 +1,32 @@
 # birdnet-lsd
 
 Motor de deteccion propio para el LSD-Tector, en reemplazo del loop de
-analisis de BirdNET-Pi. No es una red nueva -- usa el mismo modelo v10 de
-[`LSDTector-BirdNET-retrain-bsas`](https://github.com/LSDArroyoGold/LSDTector-BirdNET-retrain-bsas)
-mas el sesgo regional de [`LSDTector-BirdNET-custom-v1`](https://github.com/LSDArroyoGold/LSDTector-BirdNET-custom-v1) --
-lo que cambia es la logica de decision alrededor del modelo.
+analisis de BirdNET-Pi.
+
+## Cambio de modelo (29/08/2026)
+
+El clasificador de especies cambio por completo. **BirdNET reentrenado
+(v10, tflite)** -- descripto en el resto de este README como el modelo
+original -- fue retirado: revision manual encontro que sobre-disparaba de
+forma estructural (etiquetaba practicamente cualquier cosa como Hornero,
+no un problema de calibracion fina que el podado/sesgo pudieran arreglar
+del todo). El codigo completo del modelo viejo sigue disponible en el
+historial de git (tag `pre-tectornet`) y en el repo espejo
+[`birdnet-lsd-v1`](https://github.com/LSDArroyoGold/birdnet-lsd-v1).
+
+Reemplazo: **TectorNet** -- Perch 2.0 ONNX (decisor, 14795 especies) +
+BirdSet EfficientNetB1 ONNX (filtro de confirmacion cruzada, sin sesgo),
+ambos cargados directo con `onnxruntime`, sin TensorFlow ni PyTorch.
+Prototipo y arquitectura original en
+[`TectorNet`](https://github.com/LSDArroyoGold/TectorNet) (de un
+colaborador nuevo del equipo); portado e integrado aca con ajustes
+adicionales de rendimiento encontrados al validar en hardware real
+(tector1, Pi4B) el mismo dia -- ver `scripts/clasificador_tectornet.py`
+para el detalle completo de la arquitectura y las notas de por que cada
+decision se tomo asi. Las secciones "Como funciona" (puntos 3-5) y
+"Validacion" mas abajo describen el modelo VIEJO -- se mantienen como
+registro historico, no como estado actual. Validacion del modelo nuevo
+en curso, a medida que tector1 acumula detecciones reales con el.
 
 ## Por que existe
 
@@ -59,7 +81,7 @@ En vez de clasificar cada ventana fija de forma aislada, el flujo es:
    que ya convive en el mismo modelo Append. No requiere modificar el
    `.tflite`, es una mascara aplicada en cada corrida.
 
-## Validacion (22-23/08/2026)
+## Validacion (22-23/08/2026) -- modelo VIEJO, ver nota al principio del README
 
 Motor completo (acumulador + ventanas solapadas + confianza_racha + sesgo
 + podado) contra:
@@ -124,14 +146,13 @@ cd birdnet-lsd
 bash instalar.sh
 ```
 
-Descarga el modelo v10 y el sesgo regional desde los repos correspondientes
-(no estan commiteados aca, pesan demasiado) y arma un venv dedicado.
-Verificar que quedo bien instalado:
-
-```bash
-source venv/bin/activate
-python3 pruebas/verificar_instalacion.py
-```
+Arma un venv dedicado e instala las dependencias (sin TensorFlow ni
+PyTorch). BirdSet ya viene commiteado en `modelo/` (no tiene host publico
+propio todavia); Perch2 se descarga solo del cache de HuggingFace la
+primera vez que corre. El propio `instalar.sh` verifica que el
+clasificador carga y clasifica de punta a punta al final (mismo chequeo
+que usa `scripts/actualizar_birdnet_lsd.sh` para decidir si un update
+rompio algo).
 
 Completar `config/config_birdweather.txt` y `config/config_sincronizacion.txt`
 a partir de sus `.ejemplo` (datos del dispositivo, no se commitean).
@@ -147,13 +168,23 @@ journalctl -u birdnet-lsd.service -f
 ## Estructura
 
 - `scripts/detector.py` -- `DetectorActividad` (disparador) y
-  `AcumuladorEventos` (acumulacion cruzando bloques).
-- `scripts/clasificador.py` -- `Clasificador`: ventanas solapadas, sesgo
-  regional, podado, y las distintas formas de decision probadas (pico,
-  mayoria, confianza acumulada, racha, confianza+racha -- la usada).
-- `scripts/motor.py` -- loop principal en vivo: captura con `arecord`,
-  encadena acumulador + clasificador + exportacion + BirdWeather + Drive
-  por cada deteccion.
+  `AcumuladorEventos` (acumulacion cruzando bloques). Sin cambios con el
+  cambio de modelo -- es agnostico al clasificador.
+- `scripts/clasificador_tectornet.py` -- `ClasificadorTectorNet`: Perch2
+  decide (racha ponderada, mismo mecanismo que el `Clasificador` viejo),
+  BirdSet confirma sin sesgo sobre el mismo tramo de audio de la racha
+  ganadora. Ver el docstring del modulo para el detalle completo.
+- `scripts/preprocess_birdset.py` -- audio -> espectrograma mel de
+  BirdSet, reimplementado en `librosa` puro (sin torch).
+- `scripts/motor.py` -- loop principal en vivo: captura con `arecord` en
+  un hilo, clasificacion (Perch2+BirdSet, mas pesada que el tflite viejo)
+  en OTRO hilo aparte via una cola -- ver el docstring del modulo, seccion
+  "Cambio de arquitectura", para por que esto dejo de ser un solo hilo.
+- `scripts/verificar_clasificador.py` -- smoke-test del clasificador real
+  sobre `scripts/test_audio/muestra_salud.mp3` (audio real corto,
+  commiteado). Usado por `instalar.sh` y por el chequeo de salud de
+  `actualizar_birdnet_lsd.sh` -- no valida precision, valida que el
+  pipeline corre sin crashear ni colgarse.
 - `scripts/audio_io.py` -- escritura del audio del evento a mp3 (320kbps,
   sin lowpass) via `ffmpeg`.
 - `scripts/exportador.py` -- nombre de archivo y carpeta, mismo patron
@@ -162,15 +193,25 @@ journalctl -u birdnet-lsd.service -f
 - `scripts/birdweather.py` / `scripts/drive.py` -- POST a BirdWeather y
   subida a Drive de una deteccion, ambos event-driven (ver seccion de
   sincronizacion mas arriba).
+- `scripts/actualizar_birdnet_lsd.sh` -- git pull + reinstalar
+  dependencias si `requirements.txt` cambio + chequeo de salud real
+  (`verificar_clasificador.py`, con timeout) + rollback automatico si
+  algo rompio. Corre en cada ventana de amanecer/atardecer.
 - `config/config_deteccion.txt` -- todos los parametros ajustables (banda
-  del disparador, umbrales, tope de duracion, buffer de bloques, captura).
+  del disparador, umbrales, tope de duracion, buffer de bloques, captura,
+  mas ESCALA/PASO_VENTANA_S especificos de TectorNet).
+- `config/delta_b_reforzado_v2.json` -- sesgo regional de Perch2 (por
+  nombre cientifico directo, ALPHA=0.7).
 - `config/config_birdweather.txt.ejemplo` / `config/config_sincronizacion.txt.ejemplo`
   -- plantillas de datos especificos del dispositivo (no se commitean).
 - `systemd/birdnet-lsd.service` + `instalar_servicio.sh` -- arranque
   automatico y reinicio solo (`Restart=always`) si el proceso muere.
-- `modelo/v10_podado.json` -- que neuronas de v10 quedan suprimidas y por
-  que (commiteado; el resto de `modelo/` se descarga con `instalar.sh`).
-- `pruebas/` -- scripts de validacion (algunos referencian datasets
-  locales del desarrollo, no pensados para correr fuera de esa maquina;
-  `verificar_instalacion.py` si es autocontenido y sirve para cualquier
-  instalacion nueva).
+- `modelo/` -- `birdset_efficientnetb1.onnx` (commiteado, 72MB, sin host
+  publico propio todavia), `birdset_efficientnetb1_config.json`,
+  `perch2_labels.csv`, `eBird_taxonomy_codes_2024E.json`. Perch2 en si
+  (`perch_v2_no_dft.onnx`) NO esta commiteado -- se descarga solo del
+  cache de HuggingFace la primera vez que corre `motor.py`.
+- `pruebas/` -- scripts de validacion del modelo VIEJO (algunos
+  referencian `clasificador.py`, que ya no existe -- pendiente
+  actualizarlos o retirarlos, no se toco en el cambio de modelo por no
+  ser parte del pipeline en vivo).

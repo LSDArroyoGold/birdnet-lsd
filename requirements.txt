@@ -1,7 +1,13 @@
+# tensorflow y resampy retirados el 29/08/2026 junto con el clasificador
+# BirdNET tflite viejo (eran su unica dependencia -- ver clasificador.py
+# en el historial de git / tag "pre-tectornet"). onnxruntime, pandas y
+# huggingface_hub son nuevos, para TectorNet (Perch2 + BirdSet ONNX, sin
+# TensorFlow ni PyTorch -- ver clasificador_tectornet.py).
 numpy
 scipy
 librosa
 soundfile
-resampy
-tensorflow
 requests
+onnxruntime>=1.29
+pandas>=2.0
+huggingface_hub>=0.34
