@@ -69,9 +69,27 @@ fi
 
 chequear_salud() {
 	sudo systemctl restart birdnet-lsd.service
-	sleep 5
-	systemctl is-active --quiet birdnet-lsd.service || return 1
-	pgrep -f "arecord -f S16_LE" > /dev/null || return 1
+
+	# Espera con reintentos, no un "sleep 5" fijo -- encontrado en tector1
+	# el 29/08: con el clasificador viejo (BirdNET tflite, carga casi
+	# instantanea) 5s alcanzaban de sobra, pero TectorNet (Perch2+BirdSet
+	# ONNX) tarda ~4-5s solo en cargar los modelos (medido esa mañana)
+	# ANTES de que motor.py llegue a lanzar arecord -- confirmado que un
+	# "sleep 5" fijo hacia fallar el chequeo (pgrep no encontraba arecord
+	# todavia) tanto probando el commit nuevo como, con menos margen aun,
+	# revirtiendo al viejo justo despues (dos restarts seguidos, con la
+	# maquina bajo mas carga de la usual por el reset/pip recien hecho).
+	# Sondear cada 1s hasta 15s es robusto a esta variacion sin depender
+	# de acertar un numero fijo de antemano.
+	ok=0
+	for _ in $(seq 1 15); do
+		if systemctl is-active --quiet birdnet-lsd.service && pgrep -f "arecord -f S16_LE" > /dev/null; then
+			ok=1
+			break
+		fi
+		sleep 1
+	done
+	[ "$ok" = "1" ] || return 1
 
 	# No alcanza con "el proceso esta vivo" -- un clasificador colgado o
 	# demasiado lento (ver motor.py, hilo_clasificador) pasaria este
