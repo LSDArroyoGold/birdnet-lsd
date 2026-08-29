@@ -35,21 +35,25 @@ BIRDNET_LSD_DIR="/home/lsd/birdnet-lsd"
 MARCA_MIGRADO="/home/lsd/.birdnet_lsd_migrado"
 
 log() {
-	# NOTA (encontrado el 29/08, no arreglado en este cambio): log_sistema.py
-	# real (/home/lsd/log_sistema.py) es especifico de eventos de ventana
-	# (INICIO/FIN/SIN_CONEXION con datos de bateria PiJuice) -- no tiene
-	# soporte real para un evento "MSG" generico, asi que esta llamada
-	# SIEMPRE cae en la rama 'else' (fin_esperado = sys.argv[3]) y explota
-	# con IndexError al recibir solo 2 argumentos. El fallback a
-	# /home/lsd/python/log_sistema.py tampoco existe en tector1. En la
-	# practica, las alertas de este script hoy solo llegan al 'echo' de
-	# ultima instancia (stdout de esta corrida), no al log real ni a
-	# Drive. Pendiente: o corregir esta llamada para que log_sistema.py
-	# tenga sentido, o loguear directo a log_sistema.txt sin pasar por ese
-	# script.
-	python3 /home/lsd/log_sistema.py MSG "birdnet-lsd: $1" 2>/dev/null \
-		|| python3 /home/lsd/python/log_sistema.py MSG "birdnet-lsd: $1" 2>/dev/null \
-		|| echo "birdnet-lsd: $1"
+	# Arreglado el 29/08/2026: log_sistema.py real (/home/lsd/log_sistema.py)
+	# es especifico de eventos de ventana (INICIO/FIN/SIN_CONEXION con datos
+	# de bateria PiJuice, ademas de importar y hablarle al hardware de
+	# PiJuice por I2C en cada llamada) -- nunca tuvo soporte real para un
+	# evento "MSG" generico, asi que la llamada anterior siempre caia en la
+	# rama 'else' (fin_esperado = sys.argv[3]) y explotaba con IndexError al
+	# recibir solo 2 argumentos. En la practica, las alertas de este script
+	# nunca habian llegado al log real ni a Drive, solo al stdout de la
+	# corrida (visible si alguien la mira en vivo, invisible en campo).
+	#
+	# Fix: escribir directo a log_sistema.txt (el archivo real, sin pasar
+	# por ese script ni tocar hardware de PiJuice) -- mismo archivo que
+	# inicio_amanecer.sh/inicio_atardecer.sh ya suben a Drive con rclone en
+	# cada ventana, asi que las alertas quedan visibles sin agregar ningun
+	# mecanismo de sincronizacion nuevo.
+	local timestamp
+	timestamp=$(date '+%Y-%m-%d %H:%M')
+	echo "[$timestamp] birdnet-lsd: $1" >> /home/lsd/log_sistema.txt
+	echo "birdnet-lsd: $1"
 }
 
 # Solo tiene sentido correr esto despues de una migracion ya completa --

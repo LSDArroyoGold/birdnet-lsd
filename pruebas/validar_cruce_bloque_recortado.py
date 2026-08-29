@@ -1,10 +1,14 @@
 """
 Repite la validacion de cruce de bloque, pero esta vez recortando cada uno
 de los dos clips originales a su tramo de señal activa real (mismo metodo
-ya validado hoy: pasa-banda + umbral relativo al piso de ruido propio)
-antes de pasarlos como 'bloques' al acumulador -- para no arrastrar el
-silencio interno de cada clip ya recortado por BirdNET-Pi, que es lo que
-causaba el cierre prematuro en la prueba anterior.
+ya validado: pasa-banda + umbral relativo al piso de ruido propio) antes
+de pasarlos como 'bloques' al acumulador -- para no arrastrar el silencio
+interno de cada clip ya recortado por BirdNET-Pi, que es lo que causaba
+el cierre prematuro en la prueba anterior (validar_cruce_bloque.py).
+
+Actualizado el 29/08/2026 para usar ClasificadorTectorNet (Perch2+BirdSet
+ONNX) en vez del Clasificador BirdNET tflite retirado -- el recorte a
+señal activa y el acumulador no cambiaron con el cambio de modelo.
 """
 import sys, os, glob, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
@@ -12,16 +16,27 @@ from datetime import datetime
 import numpy as np
 import librosa
 from scipy.signal import butter, sosfiltfilt
+import huggingface_hub
 
 from detector import cargar_config, AcumuladorEventos, SR
-from clasificador import Clasificador
+from clasificador_tectornet import ClasificadorTectorNet, cargar_config_tectornet
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'config_deteccion.txt')
+BASE_DIR = os.path.join(os.path.dirname(__file__), '..')
+CONFIG_PATH = os.path.join(BASE_DIR, 'config', 'config_deteccion.txt')
 config = cargar_config(CONFIG_PATH)
+config.update(cargar_config_tectornet(CONFIG_PATH))
 
-MODEL = os.path.expanduser('~/Desktop/Tector/LSDTector-BirdNET-custom-v1/model/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite')
-LABELS = os.path.expanduser('~/Desktop/Tector/LSDTector-BirdNET-custom-v1/model/BirdNET_GLOBAL_6K_V2.4_Model_FP16_Labels.txt')
-clasificador = Clasificador(MODEL, LABELS, config)
+perch_path = huggingface_hub.hf_hub_download(repo_id='justinchuby/Perch-onnx', filename='perch_v2_no_dft.onnx')
+clasificador = ClasificadorTectorNet(
+    perch_onnx_path=perch_path,
+    perch_labels_csv=os.path.join(BASE_DIR, 'modelo/perch2_labels.csv'),
+    birdset_onnx_path=os.path.join(BASE_DIR, 'modelo/birdset_efficientnetb1.onnx'),
+    birdset_config_json=os.path.join(BASE_DIR, 'modelo/birdset_efficientnetb1_config.json'),
+    ebird_taxonomy_json=os.path.join(BASE_DIR, 'modelo/eBird_taxonomy_codes_2024E.json'),
+    config=config,
+    bias_json=os.path.join(BASE_DIR, 'config/delta_b_reforzado_v2.json'),
+    escala=config['ESCALA'],
+)
 
 # ---- reencontrar los mismos 15 pares (misma logica que buscar_consecutivos.py) ----
 BASE = os.path.expanduser('~/Desktop/Tector/Datasets_prueba/BirdNET_Detecciones')
@@ -54,7 +69,7 @@ for i in range(len(detecciones) - 1):
 
 print(f'{len(pares)} pares encontrados\n')
 
-# ---- recorte a señal activa (mismo metodo validado hoy) ----
+# ---- recorte a señal activa (mismo metodo validado) ----
 FRAME, HOP = 1024, 256
 sos = butter(4, [config['TRIGGER_BANDA_MIN_HZ'], config['TRIGGER_BANDA_MAX_HZ']], btype='band', fs=SR, output='sos')
 
@@ -76,7 +91,7 @@ nuevo_hornero = nuevo_kestrel = nuevo_ninguna = 0
 total = 0
 
 def es(r, nombre_cientifico):
-    return bool(r and r['especie'] and nombre_cientifico in r['especie'] and r['detectado'])
+    return bool(r and r.get('especie') and nombre_cientifico in r['especie'] and r['detectado'])
 
 for a, b in pares:
     ya, _ = librosa.load(a['path'], sr=SR, mono=True)
@@ -84,8 +99,8 @@ for a, b in pares:
     ya_rec = recortar_a_senal_activa(ya)
     yb_rec = recortar_a_senal_activa(yb)
 
-    r_a = clasificador.clasificar_evento(ya_rec)
-    r_b = clasificador.clasificar_evento(yb_rec)
+    r_a = clasificador.clasificar_evento(ya_rec, paso_s=config['PASO_VENTANA_S'])
+    r_b = clasificador.clasificar_evento(yb_rec, paso_s=config['PASO_VENTANA_S'])
     baseline_hornero = any(es(r, 'Furnarius rufus') for r in (r_a, r_b))
     baseline_kestrel = any(es(r, 'Falco sparverius') for r in (r_a, r_b))
 
@@ -98,7 +113,7 @@ for a, b in pares:
         nuevo_r = None
     else:
         evento = max(acumulador.eventos_terminados, key=lambda e: len(e['audio']))['audio']
-        nuevo_r = clasificador.clasificar_evento(evento)
+        nuevo_r = clasificador.clasificar_evento(evento, paso_s=config['PASO_VENTANA_S'])
 
     nuevo_es_hornero = es(nuevo_r, 'Furnarius rufus')
     nuevo_es_kestrel = es(nuevo_r, 'Falco sparverius')
@@ -111,16 +126,16 @@ for a, b in pares:
     nuevo_kestrel += nuevo_es_kestrel
     nuevo_ninguna += not (nuevo_es_hornero or nuevo_es_kestrel)
 
-    detalle = f"{nuevo_r['especie']} {nuevo_r['confianza']:.3f}" if nuevo_r else ''
+    detalle = f"{nuevo_r['especie']} {nuevo_r['confianza']:.3f}" if (nuevo_r and nuevo_r.get('especie')) else ''
     print(f"{a['dt']}  {a['especie']}(c{a['conf']}) + {b['especie']}(c{b['conf']})  "
           f"[recortados a {len(ya_rec)/SR:.2f}s + {len(yb_rec)/SR:.2f}s]")
     print(f"  baseline (piezas sueltas): Hornero={'si' if baseline_hornero else 'no'}  Kestrel={'si' if baseline_kestrel else 'no'}"
           f"{'  <- las DOS a la vez' if (baseline_hornero and baseline_kestrel) else ''}")
-    print(f"  motor nuevo ({detalle}): "
+    print(f"  motor ({detalle}): "
           f"{'HORNERO' if nuevo_es_hornero else ('KESTREL' if nuevo_es_kestrel else 'ninguna')}\n")
 
 print(f'===== Resumen ({total} casos) — lo ideal seria Hornero=15, Kestrel=0 =====')
 print(f'Baseline (piezas sueltas, como hoy):')
 print(f'  Hornero detectado: {base_hornero}/{total}   Kestrel (falso positivo) detectado: {base_kestrel}/{total}   ambas a la vez: {base_ambas}/{total}')
-print(f'Motor nuevo (evento completo, una sola respuesta):')
+print(f'Motor (evento completo, una sola respuesta):')
 print(f'  Hornero detectado: {nuevo_hornero}/{total}   Kestrel (falso positivo) detectado: {nuevo_kestrel}/{total}   ninguna: {nuevo_ninguna}/{total}')

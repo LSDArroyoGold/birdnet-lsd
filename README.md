@@ -211,7 +211,9 @@ journalctl -u birdnet-lsd.service -f
   `perch2_labels.csv`, `eBird_taxonomy_codes_2024E.json`. Perch2 en si
   (`perch_v2_no_dft.onnx`) NO esta commiteado -- se descarga solo del
   cache de HuggingFace la primera vez que corre `motor.py`.
-- `pruebas/` -- scripts de validacion del modelo VIEJO (algunos
-  referencian `clasificador.py`, que ya no existe -- pendiente
-  actualizarlos o retirarlos, no se toco en el cambio de modelo por no
-  ser parte del pipeline en vivo).
+- `pruebas/` -- `validar_cruce_bloque.py`/`validar_cruce_bloque_recortado.py`
+  (prueban el `AcumuladorEventos`, agnostico al modelo -- actualizados
+  para usar `ClasificadorTectorNet`) y `comparar_criterios_decision.py`
+  (RETIRADO, no se porto -- comparaba 4 formas de decision especificas
+  del `Clasificador` viejo que `ClasificadorTectorNet` no expone, ver su
+  docstring).

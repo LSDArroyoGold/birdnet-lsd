@@ -1,8 +1,28 @@
 """
-Compara las 4 formas de decision (pico, mayoria, confianza acumulada,
-racha) sobre el mismo set de 15 pares Hornero/Kestrel reconstruidos,
-usando la metrica (Hornero - Kestrel) / (Hornero + Kestrel): +1 = ideal
-(todos Hornero, cero Kestrel), -1 = todo lo contrario, 0 = empate.
+RETIRADO el 29/08/2026, no se porto al cambio de modelo -- se deja como
+registro historico, no borrado, pero NO VA A CORRER tal cual (importa
+clasificador.py, eliminado del repo).
+
+Comparaba las 4 formas de decision (pico, mayoria, confianza acumulada,
+racha) que exponia el Clasificador BirdNET tflite viejo, sobre el mismo
+set de 15 pares Hornero/Kestrel reconstruidos, usando la metrica
+(Hornero - Kestrel) / (Hornero + Kestrel): +1 = ideal (todos Hornero,
+cero Kestrel), -1 = todo lo contrario, 0 = empate. 'racha' gano esta
+comparacion en su momento (22/08) y fue el criterio que se uso en
+produccion desde entonces.
+
+Por que no se porta a ClasificadorTectorNet: esas 4 formas de decision
+alternativas (decidir_pico/decidir_mayoria/decidir_confianza_acumulada/
+decidir_racha) eran especificas del Clasificador viejo -- TectorNet
+implementa UNICAMENTE la logica de racha (ya la ganadora de esta misma
+comparacion), no expone las otras 3 como metodos alternativos. No hay
+nada real que comparar aca con el modelo nuevo: la pregunta que este
+script contestaba ya esta contestada y horneada en el diseño de
+TectorNet. Si en el futuro se quisiera volver a explorar formas de
+decision alternativas, habria que agregarlas primero a
+clasificador_tectornet.py -- este script no es el punto de partida para
+eso, es solo el registro de por que se eligio 'racha' para el modelo
+anterior.
 """
 import sys, os, glob, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
