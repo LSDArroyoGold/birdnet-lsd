@@ -15,9 +15,10 @@
 #
 # Mismo principio rector que migrar_a_birdnet_lsd.sh: NUNCA dejar al
 # dispositivo sin motor de deteccion sano. Si el pull trae un cambio que
-# rompe el servicio (no queda activo, o arecord no arranca), se revierte
-# solo al commit anterior (que ya se sabia sano) y se reintenta -- nunca
-# se deja el pull nuevo aplicado si no paso el chequeo de salud.
+# rompe el servicio (no queda activo, o arecord no arranca, o el
+# clasificador no clasifica), se revierte solo al commit anterior (que ya
+# se sabia sano) y se reintenta -- nunca se deja el pull nuevo aplicado
+# si no paso el chequeo de salud.
 
 set -uo pipefail
 
@@ -25,6 +26,18 @@ BIRDNET_LSD_DIR="/home/lsd/birdnet-lsd"
 MARCA_MIGRADO="/home/lsd/.birdnet_lsd_migrado"
 
 log() {
+	# NOTA (encontrado el 29/08, no arreglado en este cambio): log_sistema.py
+	# real (/home/lsd/log_sistema.py) es especifico de eventos de ventana
+	# (INICIO/FIN/SIN_CONEXION con datos de bateria PiJuice) -- no tiene
+	# soporte real para un evento "MSG" generico, asi que esta llamada
+	# SIEMPRE cae en la rama 'else' (fin_esperado = sys.argv[3]) y explota
+	# con IndexError al recibir solo 2 argumentos. El fallback a
+	# /home/lsd/python/log_sistema.py tampoco existe en tector1. En la
+	# practica, las alertas de este script hoy solo llegan al 'echo' de
+	# ultima instancia (stdout de esta corrida), no al log real ni a
+	# Drive. Pendiente: o corregir esta llamada para que log_sistema.py
+	# tenga sentido, o loguear directo a log_sistema.txt sin pasar por ese
+	# script.
 	python3 /home/lsd/log_sistema.py MSG "birdnet-lsd: $1" 2>/dev/null \
 		|| python3 /home/lsd/python/log_sistema.py MSG "birdnet-lsd: $1" 2>/dev/null \
 		|| echo "birdnet-lsd: $1"
@@ -37,35 +50,49 @@ log() {
 
 cd "$BIRDNET_LSD_DIR" || exit 0
 
-SHA_ANTERIOR=$(git rev-parse HEAD 2>/dev/null) || exit 0
+if [ -z "${_REEXEC:-}" ]; then
+	# --- Fase 1: detectar cambios, traerlos, re-ejecutar desde cero ---
+	#
+	# Bug real encontrado en tector1 el 29/08/2026: este mismo script vive
+	# DENTRO del repo que "git reset --hard" reescribe -- si esa linea
+	# corre y despues el script sigue leyendo mas lineas de SI MISMO desde
+	# el mismo archivo (la definicion de chequear_salud(), mas abajo), bash
+	# puede terminar leyendo una mezcla de la version vieja y la nueva del
+	# archivo (confirmado empiricamente: cambios reales a chequear_salud()
+	# no se aplicaban de forma consistente en la misma corrida que los
+	# traia). Mismo patron ya resuelto para este problema en
+	# actualizar_repo.sh de LSD-Tector2.0: en vez de seguir leyendo el
+	# archivo que se acaba de reescribir, se re-ejecuta desde cero
+	# (`exec`) una vez que el archivo en disco ya es estable y completo.
+	SHA_ANTERIOR=$(git rev-parse HEAD 2>/dev/null) || exit 0
 
-git fetch --quiet origin main || { log "ALERTA: git fetch fallo, sigue con la version actual"; exit 0; }
+	git fetch --quiet origin main || { log "ALERTA: git fetch fallo, sigue con la version actual"; exit 0; }
 
-SHA_REMOTO=$(git rev-parse origin/main 2>/dev/null)
-if [ -z "$SHA_REMOTO" ] || [ "$SHA_REMOTO" = "$SHA_ANTERIOR" ]; then
-	exit 0  # sin cambios, nada que hacer
+	SHA_REMOTO=$(git rev-parse origin/main 2>/dev/null)
+	if [ -z "$SHA_REMOTO" ] || [ "$SHA_REMOTO" = "$SHA_ANTERIOR" ]; then
+		exit 0  # sin cambios, nada que hacer
+	fi
+
+	NECESITA_REINSTALAR=0
+	if ! git diff --quiet "$SHA_ANTERIOR" "$SHA_REMOTO" -- requirements.txt 2>/dev/null; then
+		NECESITA_REINSTALAR=1
+	fi
+
+	git reset --hard "$SHA_REMOTO" --quiet
+
+	if [ "$NECESITA_REINSTALAR" = "1" ]; then
+		"$BIRDNET_LSD_DIR/venv/bin/pip" install -q -r "$BIRDNET_LSD_DIR/requirements.txt" 2>/dev/null
+	fi
+
+	# _REEXEC evita un bucle si por lo que sea el archivo siguiera
+	# "cambiando" -- de aca en mas, TODO lo que sigue se lee de una copia
+	# fresca y completa del archivo ya actualizado.
+	SHA_ANTERIOR="$SHA_ANTERIOR" _REEXEC=1 exec bash "$BIRDNET_LSD_DIR/scripts/actualizar_birdnet_lsd.sh"
 fi
 
-# Si requirements.txt cambio entre ambos commits, reinstalar dependencias
-# despues de traer el codigo nuevo (si no cambio, no hace falta tocar el
-# venv). OJO: esto tiene que ir DESPUES del git reset --hard de abajo, no
-# antes -- bug real encontrado el 29/08/2026: con el pip install ANTES del
-# reset, "requirements.txt" en disco todavia era la version VIEJA (el
-# reset no habia corrido todavia), asi que se reinstalaba contra el
-# archivo equivocado y las dependencias nuevas nunca llegaban a instalarse
-# de verdad (el chequeo de salud de mas abajo lo hubiera agarrado -- el
-# import de la dependencia faltante hace fallar la clasificacion de
-# prueba -- pero mejor evitar el revert innecesario de entrada).
-NECESITA_REINSTALAR=0
-if ! git diff --quiet "$SHA_ANTERIOR" "$SHA_REMOTO" -- requirements.txt 2>/dev/null; then
-	NECESITA_REINSTALAR=1
-fi
-
-git reset --hard "$SHA_REMOTO" --quiet
-
-if [ "$NECESITA_REINSTALAR" = "1" ]; then
-	"$BIRDNET_LSD_DIR/venv/bin/pip" install -q -r "$BIRDNET_LSD_DIR/requirements.txt" 2>/dev/null
-fi
+# --- Fase 2: chequeo de salud + revert si hace falta (siempre corre
+# desde una lectura fresca del archivo, ver fase 1 arriba) ---
+SHA_REMOTO=$(git rev-parse HEAD 2>/dev/null)
 
 chequear_salud() {
 	sudo systemctl restart birdnet-lsd.service
