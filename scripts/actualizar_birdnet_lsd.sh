@@ -19,6 +19,15 @@
 # clasificador no clasifica), se revierte solo al commit anterior (que ya
 # se sabia sano) y se reintenta -- nunca se deja el pull nuevo aplicado
 # si no paso el chequeo de salud.
+#
+# Verificado en campo en tector1 el 29/08/2026: el mecanismo de re-exec
+# (ver "Fase 1"/"Fase 2" mas abajo) no protege la transicion desde una
+# version del script ANTERIOR a que este mismo mecanismo existiera (esa
+# version vieja no sabe re-ejecutarse, es un limite de arranque inherente
+# a cualquier fix que un script se aplique a si mismo) -- pero a partir de
+# esta version en adelante, cada actualizacion futura si pasa por el
+# re-exec correctamente. Este comentario es, de hecho, el primer cambio
+# real usado para confirmarlo end-to-end en tector1.
 
 set -uo pipefail
 
