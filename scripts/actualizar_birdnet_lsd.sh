@@ -80,7 +80,18 @@ chequear_salud() {
 	# audio de prueba fijo, con un timeout externo (no un try/except --
 	# eso no protege contra un cuelgue real de onnxruntime, solo contra
 	# una excepcion) para agarrar tanto crashes como cuelgues.
-	timeout 60 "$BIRDNET_LSD_DIR/venv/bin/python3" "$BIRDNET_LSD_DIR/scripts/verificar_clasificador.py" || return 1
+	#
+	# HF_HOME explicito: este script corre como root (via sudo), que
+	# tiene su propio $HOME (/root) sin el cache de Perch2 -- sin esto,
+	# CADA corrida de este chequeo descarga Perch2 de nuevo bajo
+	# /root/.cache/huggingface, que en la practica tarda mas de 60s
+	# (confirmado en tector1 el 29/08: timeout real, exit code 124, sin
+	# ningun problema real de codigo de por medio). El servicio real
+	# (birdnet-lsd.service) corre como "lsd" (ver systemd/birdnet-lsd.service),
+	# asi que apuntamos al cache de ESE usuario para que este chequeo
+	# use el mismo cache ya poblado, sin importar que usuario lo invoque.
+	export HF_HOME=/home/lsd/.cache/huggingface
+	timeout 90 "$BIRDNET_LSD_DIR/venv/bin/python3" "$BIRDNET_LSD_DIR/scripts/verificar_clasificador.py" || return 1
 	return 0
 }
 
