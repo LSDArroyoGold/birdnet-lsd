@@ -197,6 +197,21 @@ class ClasificadorTectorNet:
         # afuera igual porque ni la especie ni el genero estan en estas
         # 6522 -- no afecta a las especies regionales de este sitio.
         self._especies_aves = set(self._sci_a_comun.keys())
+
+        # Complemento manual: especies reales confirmadas en el sitio de
+        # tector2 que este eBird_taxonomy_codes_2024E.json no trae NI por
+        # especie NI por genero (genero entero ausente del archivo, no
+        # solo la especie puntual). Encontradas el 4/9/2026 revisando a
+        # mano el historico de carpetas de detecciones de tector2 antes de
+        # limpiar las de no-ave -- cada una verificada por nombre
+        # cientifico real, no agregada solo "porque ya tenia carpeta"
+        # (eso tambien lo tenian "Vulpes_vulpes"/"Fart", que no son aves).
+        # Ir sumando aca si aparece otro caso real.
+        self._especies_aves |= {
+            "Callonetta leucophrys",  # Pato Anteojillo / Ringed Teal
+            "Satrapa icterophrys",  # Yetapa de Collar / Yellow-browed Tyrant
+        }
+
         self._generos_aves = {sci.split(" ", 1)[0] for sci in self._especies_aves if " " in sci}
 
         # se completa en analizar_ventanas_todas(), lo consume decidir_confianza_racha()
