@@ -169,6 +169,36 @@ class ClasificadorTectorNet:
                 sci, comun = k.split("_", 1)
                 self._sci_a_comun[sci.strip()] = comun.strip()
 
+        # Whitelist de aves para el filtro de no-aves (ver _es_ave() mas
+        # abajo). self.labels (Perch2, "inat2024_fsd50k") mezcla, ademas de
+        # aves reales, otros taxones de iNaturalist (ranas, insectos,
+        # mamiferos, ej. "Acheta domesticus", "Acinonyx jubatus") y
+        # categorias de sonido generico de FSD50K (ej.
+        # "Domestic_sounds_and_home_sounds", "Musical_instrument") -- nada
+        # de eso es un ave, pero sale de la misma clasificacion "ganadora"
+        # que una especie real. Nivel 1 (especie exacta): 6522 especies de
+        # este mismo archivo de taxonomia. Nivel 2 (genero, fallback):
+        # ese catalogo de 6522 NO es la lista global completa (~11000+
+        # especies) -- medido el 4/9/2026, de los ~14597 labels de Perch2
+        # que parecen binomio cientifico, solo 6262 matchean por especie
+        # exacta contra estas 6522, pero 3339 mas tienen el GENERO
+        # representado aca aunque la especie puntual no este (ej. Perch2
+        # trae "Accipiter madagascariensis", no esta en el catalogo, pero
+        # "Accipiter" si -- es gavilan real, no falso positivo). Verificado
+        # con las especies regionales que de verdad importan aca: "Pitangus
+        # sulphuratus" (Benteveo/Great Kiskadee) y "Furnarius rufus"
+        # (Hornero) matchean por especie exacta sin problema. Con
+        # especie+genero, de esos ~14597 labels quedan ~4996 sin match --
+        # revisados a mano, son consistentemente bichos (grillos "Acheta",
+        # chinches "Acanthosoma", langostas "Acrida", mamiferos "Acinonyx")
+        # y categorias FSD50K, no aves. Limitacion conocida y aceptada: un
+        # numero chico de generos MONOTIPICOS de aves reales pero exoticas
+        # (ej. "Abeillia abeillei", colibri de Centroamerica) puede quedar
+        # afuera igual porque ni la especie ni el genero estan en estas
+        # 6522 -- no afecta a las especies regionales de este sitio.
+        self._especies_aves = set(self._sci_a_comun.keys())
+        self._generos_aves = {sci.split(" ", 1)[0] for sci in self._especies_aves if " " in sci}
+
         # se completa en analizar_ventanas_todas(), lo consume decidir_confianza_racha()
         self._ultimo_birdset_sci = None
 
@@ -193,6 +223,19 @@ class ClasificadorTectorNet:
 
     def nombre_comun_seguro(self, label):
         return self.nombre_comun_de(label).replace("'", "").replace(" ", "_")
+
+    def _es_ave(self, sci):
+        """True si sci (nombre cientifico crudo de Perch2) es un ave
+        conocida -- por especie exacta o, si no, por genero (ver el
+        comentario largo en __init__ sobre por que hace falta el fallback
+        de genero). Usado para filtrar detecciones que Perch2 gana con
+        otra cosa (bicho, sonido domestico, etc.) antes de que le cuesten
+        una corrida cara de BirdSet o terminen exportadas/subidas."""
+        sci = sci.strip()
+        if sci in self._especies_aves:
+            return True
+        genero = sci.split(" ", 1)[0]
+        return genero in self._generos_aves
 
     # ------------------------------------------------------------------
     # Perch2: ventaneo + sesgo + escala (el "decisor")
@@ -245,10 +288,19 @@ class ClasificadorTectorNet:
             self._ultimo_birdset_sci = None
         else:
             _idx_top, _conf, _largo, i_inicio, i_fin = ganadora
-            ini_muestra = i_inicio * paso
-            fin_muestra = min(len(audio_32k), i_fin * paso + win)  # +win: cubre toda la ultima ventana de la racha, no solo su inicio
-            recorte = audio_32k[ini_muestra:fin_muestra]
-            self._ultimo_birdset_sci = self._decidir_birdset(recorte, paso_s)
+            if not self._es_ave(self.labels[_idx_top]):
+                # Perch2 gano con algo que no es un ave (bicho, sonido de
+                # fondo del laboratorio, etc. -- ver _es_ave()). No tiene
+                # sentido gastar la inferencia de BirdSet, la mas cara de
+                # todo el pipeline (medida en campo: cuello de botella
+                # principal, ver docstring de mas arriba) confirmando algo
+                # que ya sabemos que no es un ave.
+                self._ultimo_birdset_sci = None
+            else:
+                ini_muestra = i_inicio * paso
+                fin_muestra = min(len(audio_32k), i_fin * paso + win)  # +win: cubre toda la ultima ventana de la racha, no solo su inicio
+                recorte = audio_32k[ini_muestra:fin_muestra]
+                self._ultimo_birdset_sci = self._decidir_birdset(recorte, paso_s)
         return resultado
 
     # ------------------------------------------------------------------
@@ -295,6 +347,21 @@ class ClasificadorTectorNet:
         if ganadora is None:
             return None
         idx_top, confianza, largo, _i_inicio, _i_fin = ganadora
+
+        if not self._es_ave(self.labels[idx_top]):
+            # Perch2 gano con algo que no es un ave -- se trata igual que
+            # "nada detectado": no se exporta el mp3 ni se sube a Drive
+            # (motor.py corta apenas ve detectado=False, ver
+            # procesar_evento()). Ver _es_ave() y el comentario largo en
+            # __init__ sobre el whitelist de especie+genero.
+            if incluir_diagnostico:
+                return {
+                    "especie_comun": self.labels[idx_top],
+                    "confianza": float(confianza),
+                    "detectado": False,
+                    "no_es_ave": True,
+                }
+            return None
 
         if confianza < self.confidence:
             if incluir_diagnostico:
