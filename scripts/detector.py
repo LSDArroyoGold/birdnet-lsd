@@ -48,9 +48,19 @@ def cargar_config_birdweather(path):
     """path: config/config_birdweather.txt (no config_birdweather.txt.ejemplo,
     ese es solo la plantilla). Devuelve BIRDWEATHER_ID vacio si el archivo
     no existe todavia -- birdweather.enviar_deteccion() ya sabe no hacer
-    nada en ese caso, igual que BirdNET-Pi cuando no esta configurado."""
+    nada en ese caso, igual que BirdNET-Pi cuando no esta configurado.
+
+    DESCARTAR_NO_CONFIRMADAS (agregado el 4/9/2026, a pedido de Diego,
+    SOLO para tector1 por ahora -- ver motor.py): TRUE descarta del todo
+    las detecciones que BirdSet no confirma (antes: se guardaban igual
+    localmente y se subian a Drive con sufijo "-nbw", para poder
+    analizarlas despues -- ese analisis en tector1 ya se hizo, ahora
+    prioriza ahorrar espacio en SD y Drive). Default FALSE (compatibilidad
+    hacia atras -- sin esta clave en el archivo, o en cualquier
+    config_birdweather.txt viejo, el comportamiento sigue siendo el de
+    siempre: guardar todo)."""
     if not os.path.isfile(path):
-        return {'BIRDWEATHER_ID': '', 'LATITUDE': '', 'LONGITUDE': ''}
+        return {'BIRDWEATHER_ID': '', 'LATITUDE': '', 'LONGITUDE': '', 'DESCARTAR_NO_CONFIRMADAS': False}
     parser = configparser.ConfigParser()
     with open(path) as f:
         contenido = '[DEFAULT]\n' + f.read()
@@ -60,6 +70,7 @@ def cargar_config_birdweather(path):
         'BIRDWEATHER_ID': c.get('BIRDWEATHER_ID', fallback='').strip(),
         'LATITUDE': c.get('LATITUDE', fallback='').strip(),
         'LONGITUDE': c.get('LONGITUDE', fallback='').strip(),
+        'DESCARTAR_NO_CONFIRMADAS': c.get('DESCARTAR_NO_CONFIRMADAS', fallback='FALSE').strip().upper() == 'TRUE',
     }
 
 

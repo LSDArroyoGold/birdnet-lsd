@@ -179,6 +179,24 @@ def procesar_evento(clasificador, evento, config_sync, config_bw, paso_ventana_s
               f"< umbral {clasificador.confidence}, audio={len(audio)/SR:.1f}s)", flush=True)
         return
 
+    if resultado.get('confianza_baja') and config_bw.get('DESCARTAR_NO_CONFIRMADAS'):
+        # DESCARTAR_NO_CONFIRMADAS (config_birdweather.txt, no
+        # sincronizado por git -- ver detector.py). SOLO activo en
+        # tector1 por ahora, a pedido de Diego el 4/9/2026: ese analisis
+        # de las detecciones sin confirmar ya se hizo ahi, ahora prioriza
+        # ahorrar espacio en SD y Drive en vez de guardarlas igual como
+        # evidencia (que es lo que sigue haciendo tector2). Ni se
+        # exporta el mp3 ni se sube a Drive -- se corta aca, antes de
+        # escribir nada a disco.
+        print(
+            f"[{timestamp_inicio.isoformat()}] {resultado['especie_comun']} "
+            f"({resultado['confianza']:.2f}, racha={resultado['racha_maxima']}, "
+            f"BirdSet=NO confirma (dijo {resultado['especie_birdset']})) -> "
+            f"descartada (DESCARTAR_NO_CONFIRMADAS)",
+            flush=True,
+        )
+        return
+
     nombre, carpeta_relativa = exportador.nombre_archivo(resultado, timestamp_inicio)
     ruta_local = os.path.join(config_sync['AUDIO_ROOT'], carpeta_relativa, nombre)
     audio_io.escribir_mp3(audio, SR, ruta_local)
