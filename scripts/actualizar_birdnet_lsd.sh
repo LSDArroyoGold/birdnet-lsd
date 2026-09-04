@@ -53,19 +53,27 @@ log() {
 	#
 	# BUG REAL encontrado el 4/9/2026 en tector2: el comentario de arriba
 	# decia la verdad a MEDIAS -- "log_sistema.txt" existe en DOS lugares
-	# (repos hermanos, ambos bajo /home/lsd), y este fix (29/08) escribia
-	# al que NO se sube a Drive (/home/lsd/log_sistema.txt, un archivo
-	# suelto que nadie mas toca) en vez del real
-	# (/home/lsd/LSD-Tector2.0/log_sistema.txt, el que
-	# inicio_amanecer.sh/inicio_atardecer.sh efectivamente suben con
-	# rclone). Resultado: las alertas de este script -- incluida la de un
-	# rollback real, "ALERTA: X rompio el servicio (revirtiendo a Y)" --
-	# nunca habian llegado a Drive, exactamente el mismo problema que se
-	# arreglaba decir que se arreglaba. Mismo bug de raiz que el de
-	# BirdWeather en motor.py (ver ahi), encontrados el mismo dia.
+	# distintos segun el dispositivo, porque este script es de un repo
+	# hermano (birdnet-lsd) compartido tal cual entre los dos:
+	#   - tector2 (LSD-Tector2.0): anidado, /home/lsd/LSD-Tector2.0/log_sistema.txt
+	#   - tector1 (LSD-Tector1.1): plano, /home/lsd/log_sistema.txt directo
+	# El fix del 29/08 escribia a la ruta plana -- resulta que esa SI es
+	# la correcta para tector1 (su convencion real), pero NO para tector2
+	# (donde nadie sube ese archivo suelto a ningun lado). Un fix
+	# hardcodeado a la ruta anidada de tector2 arreglaria uno y romperia
+	# el otro en silencio -- exactamente el mismo problema de nuevo. Se
+	# detecta por la presencia de la carpeta LSD-Tector2.0 en vez de
+	# asumir una sola convencion (mismo criterio que _LOG_SISTEMA_REAL en
+	# motor.py, mismo bug, encontrados el mismo dia).
+	local ruta_log
+	if [ -d /home/lsd/LSD-Tector2.0 ]; then
+		ruta_log=/home/lsd/LSD-Tector2.0/log_sistema.txt
+	else
+		ruta_log=/home/lsd/log_sistema.txt
+	fi
 	local timestamp
 	timestamp=$(date '+%Y-%m-%d %H:%M')
-	echo "[$timestamp] birdnet-lsd: $1" >> /home/lsd/LSD-Tector2.0/log_sistema.txt
+	echo "[$timestamp] birdnet-lsd: $1" >> "$ruta_log"
 	echo "birdnet-lsd: $1"
 }
 

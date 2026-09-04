@@ -65,16 +65,26 @@ from detector import SR, AcumuladorEventos, cargar_config, cargar_config_birdwea
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Ruta fija al log_sistema.txt REAL -- el que inicio_amanecer.sh/
-# inicio_atardecer.sh de LSD-Tector2.0 efectivamente suben a Drive con
-# rclone en cada ventana. birdnet-lsd es un repo hermano independiente
-# (no importa nada de LSD-Tector2.0), asi que esto es una ruta fija a
-# proposito, mismo criterio que ya usan otras rutas fijas de este
-# proyecto (config/rclone.conf, BirdSongs/, etc.) todas bajo el mismo
-# usuario lsd. Encontrado el 4/9/2026 el mismo bug en
-# actualizar_birdnet_lsd.sh (escribia a /home/lsd/log_sistema.txt, un
-# archivo DISTINTO que nadie sube a ningun lado) -- ver ese script.
-_LOG_SISTEMA_REAL = "/home/lsd/LSD-Tector2.0/log_sistema.txt"
+def _detectar_log_sistema_real():
+    """birdnet-lsd es un repo hermano independiente, compartido tal cual
+    entre tector1 (LSD-Tector1.1) y tector2 (LSD-Tector2.0) -- pero cada
+    uno tiene su PROPIA convencion de ruta para el log_sistema.txt que de
+    verdad se sube a Drive en cada ventana:
+      - tector2 (LSD-Tector2.0): anidado, /home/lsd/LSD-Tector2.0/log_sistema.txt
+      - tector1 (LSD-Tector1.1): plano, /home/lsd/log_sistema.txt directo
+    Bug real encontrado el 4/9/2026: la primera version de este archivo
+    (mismo dia) hardcodeaba la ruta de tector2 -- arreglaba las alertas
+    ahi pero las rompia en tector1 en silencio apenas bajara este mismo
+    commit por git pull, exactamente la clase de bug de "arregla uno,
+    rompe el otro" que se estaba arreglando. Se detecta por la presencia
+    de la carpeta LSD-Tector2.0 (no existe en tector1) en vez de asumir
+    una sola convencion."""
+    if os.path.isdir("/home/lsd/LSD-Tector2.0"):
+        return "/home/lsd/LSD-Tector2.0/log_sistema.txt"
+    return "/home/lsd/log_sistema.txt"
+
+
+_LOG_SISTEMA_REAL = _detectar_log_sistema_real()
 
 
 def _alertar(mensaje):
