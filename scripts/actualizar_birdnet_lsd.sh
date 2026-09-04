@@ -50,9 +50,22 @@ log() {
 	# inicio_amanecer.sh/inicio_atardecer.sh ya suben a Drive con rclone en
 	# cada ventana, asi que las alertas quedan visibles sin agregar ningun
 	# mecanismo de sincronizacion nuevo.
+	#
+	# BUG REAL encontrado el 4/9/2026 en tector2: el comentario de arriba
+	# decia la verdad a MEDIAS -- "log_sistema.txt" existe en DOS lugares
+	# (repos hermanos, ambos bajo /home/lsd), y este fix (29/08) escribia
+	# al que NO se sube a Drive (/home/lsd/log_sistema.txt, un archivo
+	# suelto que nadie mas toca) en vez del real
+	# (/home/lsd/LSD-Tector2.0/log_sistema.txt, el que
+	# inicio_amanecer.sh/inicio_atardecer.sh efectivamente suben con
+	# rclone). Resultado: las alertas de este script -- incluida la de un
+	# rollback real, "ALERTA: X rompio el servicio (revirtiendo a Y)" --
+	# nunca habian llegado a Drive, exactamente el mismo problema que se
+	# arreglaba decir que se arreglaba. Mismo bug de raiz que el de
+	# BirdWeather en motor.py (ver ahi), encontrados el mismo dia.
 	local timestamp
 	timestamp=$(date '+%Y-%m-%d %H:%M')
-	echo "[$timestamp] birdnet-lsd: $1" >> /home/lsd/log_sistema.txt
+	echo "[$timestamp] birdnet-lsd: $1" >> /home/lsd/LSD-Tector2.0/log_sistema.txt
 	echo "birdnet-lsd: $1"
 }
 
@@ -119,17 +132,30 @@ chequear_salud() {
 	# todavia) tanto probando el commit nuevo como, con menos margen aun,
 	# revirtiendo al viejo justo despues (dos restarts seguidos, con la
 	# maquina bajo mas carga de la usual por el reset/pip recien hecho).
-	# Sondear cada 1s hasta 15s es robusto a esta variacion sin depender
-	# de acertar un numero fijo de antemano.
+	# Sondear cada 1s es robusto a esta variacion sin depender de acertar
+	# un numero fijo de antemano -- pero el numero de intentos si importa:
+	# 15s (el valor original del 29/08) resulto ser insuficiente en la
+	# practica. Confirmado en tector2 el 4/9/2026: bajo carga real de CPU
+	# (Pi caliente por uso sostenido, no por ningun bug de este commit en
+	# particular), el mismo restart que normalmente tarda 1s en levantar
+	# arecord tardo mas de 15s DOS VECES SEGUIDAS -- el chequeo dio por
+	# roto un commit que en realidad funcionaba bien (confirmado
+	# reproduciendolo a mano: el servicio SI llegaba a levantar arecord y
+	# clasificar correctamente, solo que mas tarde de lo que este poll
+	# esperaba), disparando un rollback innecesario. Subido a 45s con
+	# margen real para ese escenario.
 	ok=0
-	for _ in $(seq 1 15); do
+	for _ in $(seq 1 45); do
 		if systemctl is-active --quiet birdnet-lsd.service && pgrep -f "arecord -f S16_LE" > /dev/null; then
 			ok=1
 			break
 		fi
 		sleep 1
 	done
-	[ "$ok" = "1" ] || return 1
+	if [ "$ok" != "1" ]; then
+		log "ALERTA: chequear_salud -- arecord no aparecio en 45s tras el restart (servicio activo=$(systemctl is-active birdnet-lsd.service 2>&1))"
+		return 1
+	fi
 
 	# No alcanza con "el proceso esta vivo" -- un clasificador colgado o
 	# demasiado lento (ver motor.py, hilo_clasificador) pasaria este
@@ -149,7 +175,10 @@ chequear_salud() {
 	# asi que apuntamos al cache de ESE usuario para que este chequeo
 	# use el mismo cache ya poblado, sin importar que usuario lo invoque.
 	export HF_HOME=/home/lsd/.cache/huggingface
-	timeout 90 "$BIRDNET_LSD_DIR/venv/bin/python3" "$BIRDNET_LSD_DIR/scripts/verificar_clasificador.py" || return 1
+	if ! timeout 90 "$BIRDNET_LSD_DIR/venv/bin/python3" "$BIRDNET_LSD_DIR/scripts/verificar_clasificador.py"; then
+		log "ALERTA: chequear_salud -- verificar_clasificador.py fallo o colgo (90s)"
+		return 1
+	fi
 	return 0
 }
 

@@ -65,6 +65,30 @@ from detector import SR, AcumuladorEventos, cargar_config, cargar_config_birdwea
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Ruta fija al log_sistema.txt REAL -- el que inicio_amanecer.sh/
+# inicio_atardecer.sh de LSD-Tector2.0 efectivamente suben a Drive con
+# rclone en cada ventana. birdnet-lsd es un repo hermano independiente
+# (no importa nada de LSD-Tector2.0), asi que esto es una ruta fija a
+# proposito, mismo criterio que ya usan otras rutas fijas de este
+# proyecto (config/rclone.conf, BirdSongs/, etc.) todas bajo el mismo
+# usuario lsd. Encontrado el 4/9/2026 el mismo bug en
+# actualizar_birdnet_lsd.sh (escribia a /home/lsd/log_sistema.txt, un
+# archivo DISTINTO que nadie sube a ningun lado) -- ver ese script.
+_LOG_SISTEMA_REAL = "/home/lsd/LSD-Tector2.0/log_sistema.txt"
+
+
+def _alertar(mensaje):
+    """Alerta que SI llega a Drive (a diferencia de un print a motor.log,
+    que solo vive en el disco local del dispositivo, invisible sin SSH).
+    Mismo formato de linea que ya escriben log_sistema.py (MSG) y
+    chequeo_bateria.sh, para que sea un solo log consistente."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    try:
+        with open(_LOG_SISTEMA_REAL, 'a') as f:
+            f.write(f'[{timestamp}] {mensaje}\n')
+    except Exception:
+        pass  # best-effort -- si esto falla, ya se imprimio a stderr/motor.log igual
+
 PERCH2_REPO = "justinchuby/Perch-onnx"
 PERCH2_CHECKPOINT = "perch_v2_no_dft.onnx"
 
@@ -175,10 +199,12 @@ def procesar_evento(clasificador, evento, config_sync, config_bw, paso_ventana_s
             birdweather.enviar_deteccion(config_bw, resultado, timestamp_inicio, audio, SR)
         except Exception as e:
             print(f'BirdWeather fallo (sigue el loop): {e}', file=sys.stderr, flush=True)
+            _alertar(f'ALERTA: BirdWeather fallo para {resultado["especie_comun"]} -- {e}')
 
     if not drive.subir_deteccion(config_sync, ruta_local, carpeta_relativa, nombre):
         print(f'Drive: no se pudo subir {nombre} (sigue el loop, sin reintentar)',
               file=sys.stderr, flush=True)
+        _alertar(f'ALERTA: no se pudo subir a Drive {nombre} (sin reintentar)')
 
 
 def hilo_clasificador(cola_eventos, clasificador, config_sync, config_bw, paso_ventana_s):
